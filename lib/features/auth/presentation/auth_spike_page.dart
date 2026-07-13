@@ -11,11 +11,7 @@ import '../../../data/services/google_auth_service.dart';
 import 'google_sign_in_button.dart';
 
 class AuthSpikePage extends StatefulWidget {
-  const AuthSpikePage({
-    super.key,
-    this.authService,
-    this.appsScriptApiService,
-  });
+  const AuthSpikePage({super.key, this.authService, this.appsScriptApiService});
 
   final AuthService? authService;
   final AppsScriptApiService? appsScriptApiService;
@@ -63,11 +59,11 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
     });
 
     try {
-      final HealthCheckResponse response =
-          await _appsScriptApiService.healthCheck(
-        requestId: Uuid().v4(),
-        clientVersion: AppConfig.version,
-      );
+      final HealthCheckResponse response = await _appsScriptApiService
+          .healthCheck(
+            requestId: const Uuid().v4(),
+            clientVersion: AppConfig.version,
+          );
 
       if (!mounted) {
         return;
@@ -167,7 +163,8 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                             icon: Icons.account_circle_outlined,
                             label: 'Googleログイン',
                             status: _loginStatusText,
-                            completed: _authService.status ==
+                            completed:
+                                _authService.status ==
                                 GoogleAuthStatus.signedIn,
                           ),
                           const Divider(height: 32),
@@ -182,7 +179,8 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                             icon: Icons.cloud_outlined,
                             label: 'Apps Script healthCheck',
                             status: _healthCheckStatusText,
-                            completed: _healthCheckStatus ==
+                            completed:
+                                _healthCheckStatus ==
                                 _HealthCheckStatus.success,
                           ),
                           const SizedBox(height: 24),
@@ -235,9 +233,7 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
       return '取得済み';
     }
 
-    return _authService.status == GoogleAuthStatus.initializing
-        ? '確認中'
-        : '未取得';
+    return _authService.status == GoogleAuthStatus.initializing ? '確認中' : '未取得';
   }
 
   String get _healthCheckStatusText {
@@ -250,12 +246,7 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
   }
 }
 
-enum _HealthCheckStatus {
-  notRun,
-  running,
-  success,
-  error,
-}
+enum _HealthCheckStatus { notRun, running, success, error }
 
 class _HealthCheckPanel extends StatelessWidget {
   const _HealthCheckPanel({
@@ -286,14 +277,12 @@ class _HealthCheckPanel extends StatelessWidget {
         children: <Widget>[
           Text(
             'Apps Script疎通確認',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
-          const Text(
-            '固定のhealthCheckをPOSTし、ブラウザ通信が許可されているか確認します。',
-          ),
+          const Text('固定のhealthCheckをPOSTし、ブラウザ通信が許可されているか確認します。'),
           if (status == _HealthCheckStatus.running) ...<Widget>[
             const SizedBox(height: 16),
             const Row(
@@ -308,47 +297,46 @@ class _HealthCheckPanel extends StatelessWidget {
               ],
             ),
           ],
-          if (status == _HealthCheckStatus.success && response != null)
-            ...<Widget>[
-              const SizedBox(height: 16),
-              _ResultRow(
-                icon: Icons.check_circle,
-                label: '結果',
-                value: '通信成功',
-                color: colorScheme.primary,
+          if (status == _HealthCheckStatus.success &&
+              response != null) ...<Widget>[
+            const SizedBox(height: 16),
+            _ResultRow(
+              icon: Icons.check_circle,
+              label: '結果',
+              value: '通信成功',
+              color: colorScheme.primary,
+            ),
+            const SizedBox(height: 8),
+            _ResultRow(
+              icon: Icons.schedule_outlined,
+              label: 'サーバー時刻',
+              value: response!.serverTime ?? '未取得',
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 8),
+            _ResultRow(
+              icon: Icons.http_outlined,
+              label: '応答',
+              value: '${response!.method ?? '不明'} / ${response!.stage ?? '不明'}',
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
+          if (status == _HealthCheckStatus.error &&
+              errorMessage != null) ...<Widget>[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(height: 8),
-              _ResultRow(
-                icon: Icons.schedule_outlined,
-                label: 'サーバー時刻',
-                value: response!.serverTime ?? '未取得',
-                color: colorScheme.onSurfaceVariant,
+              child: Text(
+                errorMessage!,
+                style: TextStyle(color: colorScheme.onErrorContainer),
               ),
-              const SizedBox(height: 8),
-              _ResultRow(
-                icon: Icons.http_outlined,
-                label: '応答',
-                value:
-                    '${response!.method ?? '不明'} / ${response!.stage ?? '不明'}',
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ],
-          if (status == _HealthCheckStatus.error && errorMessage != null)
-            ...<Widget>[
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  errorMessage!,
-                  style: TextStyle(color: colorScheme.onErrorContainer),
-                ),
-              ),
-            ],
+            ),
+          ],
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -431,16 +419,12 @@ class _AuthActionPanel extends StatelessWidget {
       children.add(const SizedBox(height: 16));
     }
 
-    children.add(
-      switch (authService.status) {
-        GoogleAuthStatus.initializing => const _InitializingPanel(),
-        GoogleAuthStatus.signedOut => const _SignedOutPanel(),
-        GoogleAuthStatus.signedIn => _SignedInPanel(
-            authService: authService,
-          ),
-        GoogleAuthStatus.error => const _SignedOutPanel(),
-      },
-    );
+    children.add(switch (authService.status) {
+      GoogleAuthStatus.initializing => const _InitializingPanel(),
+      GoogleAuthStatus.signedOut => const _SignedOutPanel(),
+      GoogleAuthStatus.signedIn => _SignedInPanel(authService: authService),
+      GoogleAuthStatus.error => const _SignedOutPanel(),
+    });
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -513,8 +497,7 @@ class _SignedInPanel extends StatelessWidget {
           Row(
             children: <Widget>[
               CircleAvatar(
-                backgroundColor:
-                    Theme.of(context).colorScheme.primaryContainer,
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                 child: Icon(
                   Icons.person_outline,
                   color: Theme.of(context).colorScheme.onPrimaryContainer,
@@ -528,8 +511,8 @@ class _SignedInPanel extends StatelessWidget {
                     Text(
                       displayName,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     SelectableText(user?.email ?? ''),
@@ -652,10 +635,7 @@ class _StatusRow extends StatelessWidget {
         Icon(icon, color: colorScheme.primary),
         const SizedBox(width: 12),
         Expanded(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
+          child: Text(label, style: Theme.of(context).textTheme.bodyLarge),
         ),
         const SizedBox(width: 12),
         Semantics(
@@ -672,9 +652,9 @@ class _StatusRow extends StatelessWidget {
               Text(
                 status,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: statusColor,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  color: statusColor,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
