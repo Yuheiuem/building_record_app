@@ -10,6 +10,7 @@ abstract interface class AppsScriptApiService {
   Future<HealthCheckResponse> healthCheck({
     required String requestId,
     required String clientVersion,
+    required String idToken,
   });
 
   void close();
@@ -29,11 +30,12 @@ class HttpAppsScriptApiService implements AppsScriptApiService {
   Future<HealthCheckResponse> healthCheck({
     required String requestId,
     required String clientVersion,
+    required String idToken,
   }) async {
     final String requestBody = jsonEncode(<String, Object?>{
       'action': 'healthCheck',
       'requestId': requestId,
-      'idToken': null,
+      'idToken': idToken,
       'clientVersion': clientVersion,
       'payload': <String, Object?>{},
     });
@@ -62,10 +64,9 @@ class HttpAppsScriptApiService implements AppsScriptApiService {
       }
 
       final HealthCheckResponse result = HealthCheckResponse.fromJson(decoded);
-
       if (!result.ok) {
         throw AppsScriptApiException(
-          result.message ?? 'Apps ScriptのhealthCheckが失敗しました。',
+          result.message ?? 'Apps Scriptの本人確認に失敗しました。',
           errorCode: result.errorCode,
         );
       }

@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('未ログイン状態と未実行のhealthCheckを表示する', (WidgetTester tester) async {
+  testWidgets('未ログイン状態では本人確認を実行できない', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService(
       initialStatus: GoogleAuthStatus.signedOut,
     );
@@ -25,15 +25,20 @@ void main() {
 
     expect(find.text(AppConfig.workingTitle), findsOneWidget);
     expect(find.text(AppConfig.stage), findsOneWidget);
-    expect(find.text('Apps Script通信確認'), findsOneWidget);
+    expect(find.text('Apps Script本人確認'), findsNWidgets(2));
     expect(find.text('未ログイン'), findsOneWidget);
     expect(find.text('未取得'), findsOneWidget);
     expect(find.text('未実行'), findsOneWidget);
     expect(find.text(AppConfig.version), findsOneWidget);
     expect(find.text('GoogleログインボタンはWeb版で表示されます。'), findsOneWidget);
+
+    final Finder button = find.widgetWithText(FilledButton, 'Googleログイン後に実行');
+
+    expect(button, findsOneWidget);
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
   });
 
-  testWidgets('healthCheck成功結果を表示する', (WidgetTester tester) async {
+  testWidgets('IDトークン付き本人確認の成功結果を表示する', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService(
       initialStatus: GoogleAuthStatus.signedIn,
       currentUser: const AuthenticatedGoogleUser(
@@ -56,7 +61,7 @@ void main() {
 
     final Finder healthCheckButton = find.widgetWithText(
       FilledButton,
-      'healthCheckを実行',
+      '本人確認を実行',
     );
 
     expect(healthCheckButton, findsOneWidget);
@@ -67,13 +72,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(apiService.callCount, 1);
-    expect(find.text('通信成功'), findsNWidgets(2));
+    expect(apiService.lastIdToken, 'test-id-token');
+    expect(find.text('認証成功'), findsOneWidget);
+    expect(find.text('本人確認成功'), findsOneWidget);
     expect(find.text('2026-07-13T13:24:34+09:00'), findsOneWidget);
-    expect(find.text('POST / 0-3C-1'), findsOneWidget);
-    expect(find.text('healthCheckを再実行'), findsOneWidget);
+    expect(find.text('POST / 0-3D'), findsOneWidget);
+    expect(find.text('tokeninfo_spike'), findsOneWidget);
+    expect(find.text('本人確認を再実行'), findsOneWidget);
   });
 
-  testWidgets('ログアウト後に未ログイン状態へ戻る', (WidgetTester tester) async {
+  testWidgets('ログアウト後に本人確認結果を破棄する', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService(
       initialStatus: GoogleAuthStatus.signedIn,
       currentUser: const AuthenticatedGoogleUser(
@@ -94,8 +102,16 @@ void main() {
       ),
     );
 
-    final Finder logoutButton = find.widgetWithText(OutlinedButton, 'ログアウト');
+    final Finder healthCheckButton = find.widgetWithText(
+      FilledButton,
+      '本人確認を実行',
+    );
+    await tester.ensureVisible(healthCheckButton);
+    await tester.pumpAndSettle();
+    await tester.tap(healthCheckButton);
+    await tester.pumpAndSettle();
 
+    final Finder logoutButton = find.widgetWithText(OutlinedButton, 'ログアウト');
     await tester.ensureVisible(logoutButton);
     await tester.pumpAndSettle();
     await tester.tap(logoutButton);
@@ -104,6 +120,8 @@ void main() {
     expect(authService.status, GoogleAuthStatus.signedOut);
     expect(find.text('未ログイン'), findsOneWidget);
     expect(find.text('未取得'), findsOneWidget);
+    expect(find.text('未実行'), findsOneWidget);
+    expect(find.text('本人確認成功'), findsNothing);
   });
 }
 
@@ -151,21 +169,26 @@ class _FakeAppsScriptApiService implements AppsScriptApiService {
         requestId: 'test-request-id',
         serverTime: '2026-07-13T13:24:34+09:00',
         status: 'ok',
-        stage: '0-3C-1',
+        stage: '0-3D',
         method: 'POST',
+        authenticated: true,
+        validationMode: 'tokeninfo_spike',
         errorCode: null,
         message: null,
       );
 
   final HealthCheckResponse _response;
   int callCount = 0;
+  String? lastIdToken;
 
   @override
   Future<HealthCheckResponse> healthCheck({
     required String requestId,
     required String clientVersion,
+    required String idToken,
   }) async {
     callCount += 1;
+    lastIdToken = idToken;
     return _response;
   }
 

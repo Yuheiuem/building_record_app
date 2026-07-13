@@ -42,13 +42,31 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
   }
 
   void _handleAuthChanged() {
-    if (mounted) {
-      setState(() {});
+    if (!mounted) {
+      return;
     }
+
+    setState(() {
+      if (!_authService.hasIdToken) {
+        _healthCheckStatus = _HealthCheckStatus.notRun;
+        _healthCheckResponse = null;
+        _healthCheckError = null;
+      }
+    });
   }
 
   Future<void> _runHealthCheck() async {
     if (_healthCheckStatus == _HealthCheckStatus.running) {
+      return;
+    }
+
+    final String? idToken = _authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _healthCheckStatus = _HealthCheckStatus.error;
+        _healthCheckResponse = null;
+        _healthCheckError = 'Googleログイン後に本人確認を実行してください。';
+      });
       return;
     }
 
@@ -63,6 +81,7 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
           .healthCheck(
             requestId: const Uuid().v4(),
             clientVersion: AppConfig.version,
+            idToken: idToken,
           );
 
       if (!mounted) {
@@ -132,16 +151,16 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            'Apps Script通信確認',
+                            'Apps Script本人確認',
                             style: textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Googleログインに加え、ブラウザからApps Scriptの'
-                            'healthCheckを呼び出せることを確認します。'
-                            'この段階ではIDトークンの検証やDrive接続はまだ行いません。',
+                            'Googleログインで取得したIDトークンをApps Scriptへ送り、'
+                            '許可された専用Googleアカウントであることをサーバー側で確認します。'
+                            'Drive接続はまだ行いません。',
                             style: textTheme.bodyLarge,
                           ),
                           const SizedBox(height: 24),
@@ -177,7 +196,7 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                           const Divider(height: 32),
                           _StatusRow(
                             icon: Icons.cloud_outlined,
-                            label: 'Apps Script healthCheck',
+                            label: 'Apps Script本人確認',
                             status: _healthCheckStatusText,
                             completed:
                                 _healthCheckStatus ==
@@ -190,6 +209,7 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                             status: _healthCheckStatus,
                             response: _healthCheckResponse,
                             errorMessage: _healthCheckError,
+                            canRun: _authService.hasIdToken,
                             onRun: _runHealthCheck,
                           ),
                         ],
@@ -198,7 +218,8 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'IDトークン本文は画面・ログ・GitHubへ出力しません。',
+                    'IDトークン本文は画面・ログ・GitHubへ出力しません。'
+                    '現在はtokeninfoを使う技術スパイクです。',
                     textAlign: TextAlign.center,
                     style: textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -239,9 +260,9 @@ class _AuthSpikePageState extends State<AuthSpikePage> {
   String get _healthCheckStatusText {
     return switch (_healthCheckStatus) {
       _HealthCheckStatus.notRun => '未実行',
-      _HealthCheckStatus.running => '通信中',
-      _HealthCheckStatus.success => '通信成功',
-      _HealthCheckStatus.error => '通信失敗',
+      _HealthCheckStatus.running => '認証中',
+      _HealthCheckStatus.success => '認証成功',
+      _HealthCheckStatus.error => '認証失敗',
     };
   }
 }
@@ -253,12 +274,14 @@ class _HealthCheckPanel extends StatelessWidget {
     required this.status,
     required this.response,
     required this.errorMessage,
+    required this.canRun,
     required this.onRun,
   });
 
   final _HealthCheckStatus status;
   final HealthCheckResponse? response;
   final String? errorMessage;
+  final bool canRun;
   final Future<void> Function() onRun;
 
   @override
@@ -276,13 +299,13 @@ class _HealthCheckPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            'Apps Script疎通確認',
+            'Apps Script本人確認',
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
-          const Text('固定のhealthCheckをPOSTし、ブラウザ通信が許可されているか確認します。'),
+          const Text('IDトークン付きhealthCheckをPOSTし、Apps Script側の本人確認を行います。'),
           if (status == _HealthCheckStatus.running) ...<Widget>[
             const SizedBox(height: 16),
             const Row(
@@ -293,7 +316,7 @@ class _HealthCheckPanel extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 SizedBox(width: 12),
-                Expanded(child: Text('Apps Scriptへ通信しています。')),
+                Expanded(child: Text('IDトークンを検証しています。')),
               ],
             ),
           ],
@@ -303,7 +326,7 @@ class _HealthCheckPanel extends StatelessWidget {
             _ResultRow(
               icon: Icons.check_circle,
               label: '結果',
-              value: '通信成功',
+              value: '本人確認成功',
               color: colorScheme.primary,
             ),
             const SizedBox(height: 8),
@@ -318,6 +341,13 @@ class _HealthCheckPanel extends StatelessWidget {
               icon: Icons.http_outlined,
               label: '応答',
               value: '${response!.method ?? '不明'} / ${response!.stage ?? '不明'}',
+              color: colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 8),
+            _ResultRow(
+              icon: Icons.verified_user_outlined,
+              label: '検証方式',
+              value: response!.validationMode ?? '不明',
               color: colorScheme.onSurfaceVariant,
             ),
           ],
@@ -341,12 +371,16 @@ class _HealthCheckPanel extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: status == _HealthCheckStatus.running ? null : onRun,
+              onPressed: status == _HealthCheckStatus.running || !canRun
+                  ? null
+                  : onRun,
               icon: const Icon(Icons.cloud_sync_outlined),
               label: Text(
-                status == _HealthCheckStatus.success
-                    ? 'healthCheckを再実行'
-                    : 'healthCheckを実行',
+                !canRun
+                    ? 'Googleログイン後に実行'
+                    : status == _HealthCheckStatus.success
+                    ? '本人確認を再実行'
+                    : '本人確認を実行',
               ),
             ),
           ),

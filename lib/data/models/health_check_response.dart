@@ -9,6 +9,8 @@ class HealthCheckResponse {
     required this.status,
     required this.stage,
     required this.method,
+    required this.authenticated,
+    required this.validationMode,
     required this.errorCode,
     required this.message,
   });
@@ -26,6 +28,8 @@ class HealthCheckResponse {
       status: _optionalString(data?['status']),
       stage: _optionalString(data?['stage']),
       method: _optionalString(data?['method']),
+      authenticated: data?['authenticated'] == true,
+      validationMode: _optionalString(data?['validationMode']),
       errorCode: _optionalString(json['errorCode']),
       message: _optionalString(json['message']),
     );
@@ -37,10 +41,12 @@ class HealthCheckResponse {
   final String? status;
   final String? stage;
   final String? method;
+  final bool authenticated;
+  final String? validationMode;
   final String? errorCode;
   final String? message;
 
-  bool get isHealthy => ok && status == 'ok';
+  bool get isHealthy => ok && status == 'ok' && authenticated;
 
   static String? _optionalString(Object? value) {
     if (value is! String) {
