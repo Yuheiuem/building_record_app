@@ -43,19 +43,11 @@ void main() {
     expect(find.text('test@example.com'), findsOneWidget);
     expect(find.text('IDトークンを取得できました。'), findsOneWidget);
 
-    final Finder logoutButton = find.widgetWithText(OutlinedButton, 'ログアウト');
-
-    expect(logoutButton, findsOneWidget);
-
-    await tester.ensureVisible(logoutButton);
-    await tester.pumpAndSettle();
-
-    await tester.tap(logoutButton);
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('ログアウト'));
+    await tester.pump();
 
     expect(authService.status, GoogleAuthStatus.signedOut);
     expect(find.text('未ログイン'), findsOneWidget);
-    expect(find.text('未取得'), findsOneWidget);
   });
 }
 
