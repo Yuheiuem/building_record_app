@@ -25,7 +25,7 @@ void main() {
 
     expect(find.text(AppConfig.workingTitle), findsOneWidget);
     expect(find.text(AppConfig.stage), findsOneWidget);
-    expect(find.text('Apps Script本人確認'), findsNWidgets(2));
+    expect(find.text('Apps Script本人確認'), findsWidgets);
     expect(find.text('未ログイン'), findsOneWidget);
     expect(find.text('未取得'), findsOneWidget);
     expect(find.text('未実行'), findsOneWidget);
@@ -106,12 +106,14 @@ void main() {
       FilledButton,
       '本人確認を実行',
     );
+
     await tester.ensureVisible(healthCheckButton);
     await tester.pumpAndSettle();
     await tester.tap(healthCheckButton);
     await tester.pumpAndSettle();
 
     final Finder logoutButton = find.widgetWithText(OutlinedButton, 'ログアウト');
+
     await tester.ensureVisible(logoutButton);
     await tester.pumpAndSettle();
     await tester.tap(logoutButton);

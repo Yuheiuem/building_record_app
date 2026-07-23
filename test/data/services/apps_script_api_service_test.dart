@@ -13,23 +13,27 @@ void main() {
     final MockClient client = MockClient((http.Request request) async {
       sentBody = jsonDecode(request.body) as Map<String, dynamic>;
 
-      return http.Response(
-        jsonEncode(<String, dynamic>{
-          'ok': true,
-          'requestId': 'request-123',
-          'serverTime': '2026-07-13T13:24:34+09:00',
-          'data': <String, dynamic>{
-            'status': 'ok',
-            'stage': '0-3D',
-            'method': 'POST',
-            'authenticated': true,
-            'validationMode': 'tokeninfo_spike',
-          },
-          'errorCode': null,
-          'message': null,
-        }),
+      final String responseBody = jsonEncode(<String, dynamic>{
+        'ok': true,
+        'requestId': 'request-123',
+        'serverTime': '2026-07-13T13:24:34+09:00',
+        'data': <String, dynamic>{
+          'status': 'ok',
+          'stage': '0-3D',
+          'method': 'POST',
+          'authenticated': true,
+          'validationMode': 'tokeninfo_spike',
+        },
+        'errorCode': null,
+        'message': null,
+      });
+
+      return http.Response.bytes(
+        utf8.encode(responseBody),
         200,
-        headers: <String, String>{'content-type': 'application/json'},
+        headers: const <String, String>{
+          'content-type': 'application/json; charset=utf-8',
+        },
       );
     });
 
@@ -55,16 +59,21 @@ void main() {
 
   test('Apps Scriptの認証拒否を例外として扱う', () async {
     final MockClient client = MockClient((http.Request request) async {
-      return http.Response(
-        jsonEncode(<String, dynamic>{
-          'ok': false,
-          'requestId': 'request-123',
-          'serverTime': '2026-07-13T13:24:34+09:00',
-          'data': null,
-          'errorCode': 'FORBIDDEN',
-          'message': 'このGoogleアカウントにはアクセス権限がありません。',
-        }),
+      final String responseBody = jsonEncode(<String, dynamic>{
+        'ok': false,
+        'requestId': 'request-123',
+        'serverTime': '2026-07-13T13:24:34+09:00',
+        'data': null,
+        'errorCode': 'FORBIDDEN',
+        'message': 'このGoogleアカウントにはアクセス権限がありません。',
+      });
+
+      return http.Response.bytes(
+        utf8.encode(responseBody),
         200,
+        headers: const <String, String>{
+          'content-type': 'application/json; charset=utf-8',
+        },
       );
     });
 
