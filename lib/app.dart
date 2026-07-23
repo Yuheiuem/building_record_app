@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'core/config/app_config.dart';
-import 'features/auth/presentation/auth_spike_page.dart';
+import 'features/drive_spike/presentation/drive_spike_page.dart';
 
 class BuildingRecordApp extends StatelessWidget {
   const BuildingRecordApp({super.key});
@@ -19,7 +19,7 @@ class BuildingRecordApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF4F7F8),
         useMaterial3: true,
       ),
-      home: const AuthSpikePage(),
+      home: const DriveSpikePage(),
     );
   }
 }

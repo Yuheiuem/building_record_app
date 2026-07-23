@@ -25,16 +25,29 @@ function doPost(e) {
   try {
     var request = parseJsonRequest(e);
     requestId = getOptionalString(request.requestId);
-
-    if (request.action !== 'healthCheck') {
-      throw createApiError_(
-        'VALIDATION_ERROR',
-        '未対応のactionです。'
-      );
-    }
-
     var authContext = verifyRequestAuthentication(request);
-    return handleHealthCheck(requestId, authContext);
+
+    switch (request.action) {
+      case 'healthCheck':
+        return handleHealthCheck(requestId, authContext);
+      case 'uploadSpikePhoto':
+        return handleUploadSpikePhoto(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'getSpikePhoto':
+        return handleGetSpikePhoto(
+          requestId,
+          request.payload,
+          authContext
+        );
+      default:
+        throw createApiError_(
+          'VALIDATION_ERROR',
+          '未対応のactionです。'
+        );
+    }
   } catch (error) {
     var errorCode = error && error.apiErrorCode
       ? error.apiErrorCode
@@ -61,19 +74,14 @@ function doPost(e) {
  * @return {GoogleAppsScript.Content.TextOutput}
  */
 function handleHealthCheck(requestId, authContext) {
-  if (!authContext || !authContext.subject) {
-    throw createApiError_(
-      'AUTH_REQUIRED',
-      'Googleアカウントを確認できませんでした。'
-    );
-  }
+  requireAuthenticatedContext_(authContext);
 
   return createApiResponse(
     true,
     requestId,
     {
       status: 'ok',
-      stage: '0-3D',
+      stage: '0-4',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -123,7 +131,7 @@ function parseJsonRequest(e) {
 }
 
 /**
- * 値が文字列なら返し、それ以外はnullを返す。
+ * 値が文字列なら空白を除いて返し、それ以外はnullを返す。
  *
  * @param {*} value
  * @return {string|null}
@@ -138,7 +146,34 @@ function getOptionalString(value) {
 }
 
 /**
- * Apps Scriptエディタから未認証要求の拒否を確認する。
+ * 認証済みコンテキストを要求する。
+ *
+ * @param {{subject: string, email: string}|null} authContext
+ */
+function requireAuthenticatedContext_(authContext) {
+  if (!authContext || !authContext.subject) {
+    throw createApiError_(
+      'AUTH_REQUIRED',
+      'Googleアカウントを確認できませんでした。'
+    );
+  }
+}
+
+/**
+ * API用のエラーを作成する。
+ *
+ * @param {string} errorCode
+ * @param {string} message
+ * @return {Error}
+ */
+function createApiError_(errorCode, message) {
+  var error = new Error(message);
+  error.apiErrorCode = errorCode;
+  return error;
+}
+
+/**
+ * IDトークンなしのhealthCheckが拒否されることを確認する。
  */
 function testUnauthenticatedHealthCheck() {
   var event = {
@@ -147,7 +182,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.4.0',
+        clientVersion: 'v0.5.0',
         payload: {}
       })
     }

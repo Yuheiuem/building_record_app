@@ -1,7 +1,9 @@
 abstract final class AppConfig {
   static const String workingTitle = '建築記録Webアプリ';
-  static const String version = 'v0.4.0';
-  static const String stage = '段階 0-3D';
+  static const String version = 'v0.5.0';
+  static const String stage = '段階 0-4';
+
+  static const int driveSpikeMaxPhotoBytes = 2 * 1024 * 1024;
 
   // OAuth WebクライアントIDは公開識別子です。
   // クライアントシークレットやアクセストークンはここへ置きません。
