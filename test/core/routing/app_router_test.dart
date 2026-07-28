@@ -37,7 +37,7 @@ void main() {
     authService.signIn();
     await tester.pumpAndSettle();
 
-    expect(find.text('記録画面の入口'), findsOneWidget);
+    expect(find.text('写真の下書き'), findsOneWidget);
   });
 
   testWidgets('スマホ幅では記録を主操作にする', (WidgetTester tester) async {
@@ -78,17 +78,14 @@ class _FakeAuthService extends AuthService {
        _user = user,
        _idToken = idToken;
 
-  // 認証状態を確認している途中を再現する。
   factory _FakeAuthService.initializing() {
     return _FakeAuthService._(status: GoogleAuthStatus.initializing);
   }
 
-  // 未ログイン状態を再現する。
   factory _FakeAuthService.signedOut() {
     return _FakeAuthService._(status: GoogleAuthStatus.signedOut);
   }
 
-  // ログイン済み状態を再現する。
   factory _FakeAuthService.signedIn() {
     return _FakeAuthService._(
       status: GoogleAuthStatus.signedIn,
@@ -119,7 +116,6 @@ class _FakeAuthService extends AuthService {
   @override
   Future<void> initialize() async {}
 
-  // 認証初期化が終わり、未ログインだった状態を再現する。
   void completeInitializationAsSignedOut() {
     _status = GoogleAuthStatus.signedOut;
     _user = null;
@@ -127,7 +123,6 @@ class _FakeAuthService extends AuthService {
     notifyListeners();
   }
 
-  // Googleログイン成功を再現する。
   void signIn() {
     _status = GoogleAuthStatus.signedIn;
     _user = const AuthenticatedGoogleUser(
