@@ -14,8 +14,8 @@ void main() {
       MaterialApp(
         home: RecordPage(
           authService: _FakeAuthService(),
-          imagePickerService: _FakeRecordImagePickerService(
-            const <RecordDraftPhoto>[],
+          imagePickerService: const _FakeRecordImagePickerService(
+            <RecordDraftPhoto>[],
           ),
         ),
       ),
@@ -59,7 +59,16 @@ void main() {
     expect(find.text('one.png'), findsOneWidget);
     expect(find.text('two.png'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('remove-draft-photo-photo-1')));
+    final Finder removeButton = find.byKey(
+      const Key('remove-draft-photo-photo-1'),
+    );
+
+    expect(removeButton, findsOneWidget);
+
+    await tester.ensureVisible(removeButton);
+    await tester.pumpAndSettle();
+
+    await tester.tap(removeButton);
     await tester.pumpAndSettle();
 
     expect(find.text('1枚'), findsOneWidget);
