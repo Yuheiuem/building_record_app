@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../data/models/bootstrap_data.dart';
+import '../../../data/models/building_tag.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
@@ -123,6 +124,8 @@ class _BrowsePageState extends State<BrowsePage> {
                     isLoading: _isLoading,
                     onRefresh: _loadBootstrapData,
                   ),
+                  const SizedBox(height: 16),
+                  _TagMasterCard(data: _bootstrapData),
                   const SizedBox(height: 16),
                   _BrowseNextStepCard(data: _bootstrapData),
                   const SizedBox(height: 24),
@@ -335,6 +338,135 @@ class _CountChip extends StatelessWidget {
   }
 }
 
+class _TagMasterCard extends StatelessWidget {
+  const _TagMasterCard({required this.data});
+
+  final BootstrapData? data;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.sell_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 34,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'タグマスター',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '有効なタグをGoogle Sheetsから取得し、保存先の種類ごとに表示します。',
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (data == null)
+              const Text('初期データを取得するとタグが表示されます。')
+            else
+              LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final double itemWidth = constraints.maxWidth >= 640
+                      ? (constraints.maxWidth - 12) / 2
+                      : constraints.maxWidth;
+
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: BuildingTagType.values
+                        .map((BuildingTagType type) {
+                          final List<BuildingTag> tags = data!.tags
+                              .where((BuildingTag tag) => tag.tagType == type)
+                              .toList(growable: false);
+
+                          return SizedBox(
+                            width: itemWidth,
+                            child: _TagTypePanel(type: type, tags: tags),
+                          );
+                        })
+                        .toList(growable: false),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TagTypePanel extends StatelessWidget {
+  const _TagTypePanel({required this.type, required this.tags});
+
+  final BuildingTagType type;
+  final List<BuildingTag> tags;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  type.displayName,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text('${tags.length}件'),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            type.scopeLabel,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (tags.isEmpty)
+            Text('未登録', style: TextStyle(color: colorScheme.onSurfaceVariant))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: tags
+                  .map((BuildingTag tag) => Chip(label: Text(tag.tagName)))
+                  .toList(growable: false),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _BrowseNextStepCard extends StatelessWidget {
   const _BrowseNextStepCard({required this.data});
 
@@ -366,7 +498,7 @@ class _BrowseNextStepCard extends StatelessWidget {
             Text(
               hasBuildings
                   ? '次の段階で、取得した建物を地図と一覧へ表示します。'
-                  : '段階2-1では保存先と読み取りAPIを整備しました。建物登録は後続段階で実装します。',
+                  : '段階2-2ではタグマスターの初期投入と種類別表示を整備しました。建物登録は後続段階で実装します。',
               textAlign: TextAlign.center,
             ),
           ],

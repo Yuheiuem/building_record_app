@@ -22,6 +22,11 @@ function handleGetBootstrapData(requestId, payload, authContext) {
       return tag.isActive;
     })
     .sort(function(a, b) {
+      var typeDifference = supportedTagTypeIndex_(a.tagType)
+        - supportedTagTypeIndex_(b.tagType);
+      if (typeDifference !== 0) {
+        return typeDifference;
+      }
       if (a.displayOrder !== b.displayOrder) {
         return a.displayOrder - b.displayOrder;
       }
@@ -43,7 +48,7 @@ function handleGetBootstrapData(requestId, payload, authContext) {
     requestId,
     {
       schemaVersion: DATA_SCHEMA_VERSION,
-      stage: '2-1',
+      stage: '2-2',
       buildings: buildings,
       tags: tags,
       counts: {
@@ -114,11 +119,16 @@ function normalizeTagRow_(row) {
     );
   }
 
+  requireSupportedTagType_(tagType);
+
+  var normalizedName = optionalSheetString_(row.normalizedName)
+    || normalizeTagName_(tagName);
+
   return {
     tagId: tagId,
     tagType: tagType,
     tagName: tagName,
-    normalizedName: optionalSheetString_(row.normalizedName) || '',
+    normalizedName: normalizedName,
     displayOrder: optionalSheetNumber_(row.displayOrder) || 0,
     isActive: sheetBoolean_(row.isActive),
     createdAt: sheetDateTime_(row.createdAt),
@@ -127,7 +137,7 @@ function normalizeTagRow_(row) {
 }
 
 /**
- * Apps ScriptエディタからSpreadsheet作成と空データ応答を確認する。
+ * Apps Scriptエディタからタグを含む起動データを確認する。
  */
 function testGetBootstrapData() {
   setupDataSpreadsheet();

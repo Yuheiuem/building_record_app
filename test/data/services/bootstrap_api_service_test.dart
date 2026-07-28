@@ -19,7 +19,7 @@ void main() {
         'serverTime': '2026-07-28T12:00:00+09:00',
         'data': <String, dynamic>{
           'schemaVersion': '1.0',
-          'stage': '2-1',
+          'stage': '2-2',
           'buildings': <Object?>[],
           'tags': <Object?>[],
           'counts': <String, dynamic>{
@@ -49,16 +49,16 @@ void main() {
 
     final BootstrapData result = await service.getBootstrapData(
       requestId: 'request-123',
-      clientVersion: 'v0.7.0',
+      clientVersion: 'v0.8.0',
       idToken: 'test-id-token',
     );
 
     expect(sentBody['action'], 'getBootstrapData');
     expect(sentBody['requestId'], 'request-123');
-    expect(sentBody['clientVersion'], 'v0.7.0');
+    expect(sentBody['clientVersion'], 'v0.8.0');
     expect(sentBody['idToken'], 'test-id-token');
     expect(sentBody['payload'], isEmpty);
-    expect(result.counts.buildings, 0);
+    expect(result.stage, '2-2');
 
     service.close();
   });
@@ -91,7 +91,7 @@ void main() {
     await expectLater(
       service.getBootstrapData(
         requestId: 'request-123',
-        clientVersion: 'v0.7.0',
+        clientVersion: 'v0.8.0',
         idToken: 'test-id-token',
       ),
       throwsA(

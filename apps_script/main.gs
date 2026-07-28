@@ -87,7 +87,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '2-1',
+      stage: '2-2',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -188,7 +188,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.7.0',
+        clientVersion: 'v0.8.0',
         payload: {}
       })
     }

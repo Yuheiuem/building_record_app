@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('Sheetsから取得した件数を表示し再取得できる', (WidgetTester tester) async {
+  testWidgets('タグマスターを4種類に分けて表示し再取得できる', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService();
     final _FakeBootstrapApiService apiService = _FakeBootstrapApiService();
 
@@ -23,12 +23,20 @@ void main() {
     expect(apiService.callCount, 1);
     expect(apiService.lastIdToken, 'test-id-token');
     expect(find.text('Sheets接続成功'), findsOneWidget);
-    expect(find.text('建物 0件'), findsOneWidget);
-    expect(find.text('訪問 0件'), findsOneWidget);
-    expect(find.text('写真 0件'), findsOneWidget);
-    expect(find.text('タグ 0件'), findsOneWidget);
-    expect(find.text('建物データはまだありません'), findsOneWidget);
+    expect(find.text('タグ 5件'), findsOneWidget);
+    expect(find.text('タグマスター'), findsOneWidget);
+    expect(find.text('きっかけ'), findsOneWidget);
+    expect(find.text('設計'), findsOneWidget);
+    expect(find.text('営業'), findsOneWidget);
+    expect(find.text('施工'), findsOneWidget);
+    expect(find.text('営業の仕事'), findsOneWidget);
+    expect(find.text('設計研修'), findsOneWidget);
+    expect(find.text('個人旅行'), findsOneWidget);
+    expect(find.text('当社施工'), findsOneWidget);
+    expect(find.text('鹿島施工'), findsOneWidget);
+    expect(find.text('未登録'), findsNWidgets(2));
 
+    await tester.ensureVisible(find.text('最新データを取得'));
     await tester.tap(find.text('最新データを取得'));
     await tester.pumpAndSettle();
 
@@ -76,14 +84,20 @@ class _FakeBootstrapApiService implements BootstrapApiService {
       'serverTime': '2026-07-28T12:00:00+09:00',
       'data': <String, dynamic>{
         'schemaVersion': '1.0',
-        'stage': '2-1',
+        'stage': '2-2',
         'buildings': <Object?>[],
-        'tags': <Object?>[],
+        'tags': <Map<String, dynamic>>[
+          _tagJson('tag-trigger-sales-work', 'trigger', '営業の仕事', 10),
+          _tagJson('tag-trigger-design-training', 'trigger', '設計研修', 20),
+          _tagJson('tag-trigger-personal-travel', 'trigger', '個人旅行', 30),
+          _tagJson('tag-construction-in-house', 'construction', '当社施工', 10),
+          _tagJson('tag-construction-kajima', 'construction', '鹿島施工', 20),
+        ],
         'counts': <String, dynamic>{
           'buildings': 0,
           'visits': 0,
           'photos': 0,
-          'tags': 0,
+          'tags': 5,
         },
       },
       'errorCode': null,
@@ -93,4 +107,22 @@ class _FakeBootstrapApiService implements BootstrapApiService {
 
   @override
   void close() {}
+}
+
+Map<String, dynamic> _tagJson(
+  String tagId,
+  String tagType,
+  String tagName,
+  int displayOrder,
+) {
+  return <String, dynamic>{
+    'tagId': tagId,
+    'tagType': tagType,
+    'tagName': tagName,
+    'normalizedName': tagName,
+    'displayOrder': displayOrder,
+    'isActive': true,
+    'createdAt': '2026-07-28T10:00:00+09:00',
+    'updatedAt': '2026-07-28T10:00:00+09:00',
+  };
 }
