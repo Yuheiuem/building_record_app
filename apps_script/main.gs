@@ -42,6 +42,12 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'getBootstrapData':
+        return handleGetBootstrapData(
+          requestId,
+          request.payload,
+          authContext
+        );
       default:
         throw createApiError_(
           'VALIDATION_ERROR',
@@ -81,7 +87,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '0-4',
+      stage: '2-1',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -182,7 +188,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.5.0',
+        clientVersion: 'v0.7.0',
         payload: {}
       })
     }

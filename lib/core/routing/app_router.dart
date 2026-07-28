@@ -30,9 +30,7 @@ GoRouter createAppRouter({
 
         return Uri(
           path: AppRoutes.loading,
-          queryParameters: <String, String>{
-            'from': requestedLocation,
-          },
+          queryParameters: <String, String>{'from': requestedLocation},
         ).toString();
       }
 
@@ -49,9 +47,7 @@ GoRouter createAppRouter({
 
         return Uri(
           path: AppRoutes.signIn,
-          queryParameters: <String, String>{
-            'from': requestedLocation,
-          },
+          queryParameters: <String, String>{'from': requestedLocation},
         ).toString();
       }
 
@@ -158,28 +154,21 @@ class _AuthenticationLoadingPage extends StatelessWidget {
 }
 
 class _RouteNotFoundPage extends StatelessWidget {
-  const _RouteNotFoundPage({
-    required this.requestedUri,
-  });
+  const _RouteNotFoundPage({required this.requestedUri});
 
   final Uri requestedUri;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('ページが見つかりません'),
-      ),
+      appBar: AppBar(title: const Text('ページが見つかりません')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(
-                Icons.search_off_outlined,
-                size: 56,
-              ),
+              const Icon(Icons.search_off_outlined, size: 56),
               const SizedBox(height: 16),
               Text(
                 requestedUri.path,
