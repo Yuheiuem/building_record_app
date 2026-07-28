@@ -20,8 +20,20 @@ GoRouter createAppRouter({
       final String path = state.uri.path;
       final GoogleAuthStatus status = authService.status;
 
+      // 認証初期化中は、現在開こうとしているURLをfromへ保持する。
       if (status == GoogleAuthStatus.initializing) {
-        return path == AppRoutes.loading ? null : AppRoutes.loading;
+        if (path == AppRoutes.loading) {
+          return null;
+        }
+
+        final String requestedLocation = _requestedLocation(state);
+
+        return Uri(
+          path: AppRoutes.loading,
+          queryParameters: <String, String>{
+            'from': requestedLocation,
+          },
+        ).toString();
       }
 
       final bool isSignedIn = status == GoogleAuthStatus.signedIn;
@@ -33,21 +45,18 @@ GoRouter createAppRouter({
           return null;
         }
 
-        final String from = path == AppRoutes.loading
-            ? AppRoutes.home
-            : state.uri.toString();
+        final String requestedLocation = _requestedLocation(state);
+
         return Uri(
           path: AppRoutes.signIn,
-          queryParameters: <String, String>{'from': from},
+          queryParameters: <String, String>{
+            'from': requestedLocation,
+          },
         ).toString();
       }
 
       if (isPublicRoute) {
-        final String? requestedPath = state.uri.queryParameters['from'];
-        if (requestedPath != null && requestedPath.startsWith('/')) {
-          return requestedPath;
-        }
-        return AppRoutes.home;
+        return _requestedLocation(state);
       }
 
       return null;
@@ -96,6 +105,38 @@ GoRouter createAppRouter({
   );
 }
 
+/// 認証初期化やログイン画面を挟んでも、元々開こうとしたURLを返す。
+String _requestedLocation(GoRouterState state) {
+  final String? from = state.uri.queryParameters['from'];
+
+  if (_isRestorableLocation(from)) {
+    return from!;
+  }
+
+  final String currentLocation = state.uri.toString();
+
+  if (_isRestorableLocation(currentLocation)) {
+    return currentLocation;
+  }
+
+  return AppRoutes.home;
+}
+
+/// loadingとsign-in自体は復帰先にしない。
+bool _isRestorableLocation(String? location) {
+  if (location == null || !location.startsWith('/')) {
+    return false;
+  }
+
+  final Uri? uri = Uri.tryParse(location);
+
+  if (uri == null) {
+    return false;
+  }
+
+  return uri.path != AppRoutes.loading && uri.path != AppRoutes.signIn;
+}
+
 class _AuthenticationLoadingPage extends StatelessWidget {
   const _AuthenticationLoadingPage();
 
@@ -117,21 +158,28 @@ class _AuthenticationLoadingPage extends StatelessWidget {
 }
 
 class _RouteNotFoundPage extends StatelessWidget {
-  const _RouteNotFoundPage({required this.requestedUri});
+  const _RouteNotFoundPage({
+    required this.requestedUri,
+  });
 
   final Uri requestedUri;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ページが見つかりません')),
+      appBar: AppBar(
+        title: const Text('ページが見つかりません'),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(Icons.search_off_outlined, size: 56),
+              const Icon(
+                Icons.search_off_outlined,
+                size: 56,
+              ),
               const SizedBox(height: 16),
               Text(
                 requestedUri.path,

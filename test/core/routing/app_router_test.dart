@@ -15,8 +15,8 @@ void main() {
     expect(find.text('建築を記録する'), findsNothing);
   });
 
-  testWidgets('保護されたURLはログイン後に元の画面へ戻る', (WidgetTester tester) async {
-    final _FakeAuthService authService = _FakeAuthService.signedOut();
+  testWidgets('認証初期化中でも保護されたURLを保持する', (WidgetTester tester) async {
+    final _FakeAuthService authService = _FakeAuthService.initializing();
 
     await tester.pumpWidget(
       BuildingRecordApp(
@@ -24,6 +24,12 @@ void main() {
         initialLocation: AppRoutes.record,
       ),
     );
+
+    await tester.pump();
+
+    expect(find.text('ログイン状態を確認しています。'), findsOneWidget);
+
+    authService.completeInitializationAsSignedOut();
     await tester.pumpAndSettle();
 
     expect(find.text('Googleアカウントでログイン'), findsOneWidget);
@@ -72,10 +78,17 @@ class _FakeAuthService extends AuthService {
        _user = user,
        _idToken = idToken;
 
+  // 認証状態を確認している途中を再現する。
+  factory _FakeAuthService.initializing() {
+    return _FakeAuthService._(status: GoogleAuthStatus.initializing);
+  }
+
+  // 未ログイン状態を再現する。
   factory _FakeAuthService.signedOut() {
     return _FakeAuthService._(status: GoogleAuthStatus.signedOut);
   }
 
+  // ログイン済み状態を再現する。
   factory _FakeAuthService.signedIn() {
     return _FakeAuthService._(
       status: GoogleAuthStatus.signedIn,
@@ -106,6 +119,15 @@ class _FakeAuthService extends AuthService {
   @override
   Future<void> initialize() async {}
 
+  // 認証初期化が終わり、未ログインだった状態を再現する。
+  void completeInitializationAsSignedOut() {
+    _status = GoogleAuthStatus.signedOut;
+    _user = null;
+    _idToken = null;
+    notifyListeners();
+  }
+
+  // Googleログイン成功を再現する。
   void signIn() {
     _status = GoogleAuthStatus.signedIn;
     _user = const AuthenticatedGoogleUser(
