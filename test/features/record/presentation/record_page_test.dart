@@ -21,7 +21,9 @@ void main() {
           imagePickerService: const _FakeRecordImagePickerService(
             <RecordDraftPhoto>[],
           ),
-          bootstrapApiService: _FakeBootstrapApiService(_emptyBootstrapData()),
+          bootstrapApiService: _FakeBootstrapApiService(
+            _emptyBootstrapData(),
+          ),
         ),
       ),
     );
@@ -56,7 +58,9 @@ void main() {
         home: RecordPage(
           authService: _FakeAuthService(),
           imagePickerService: _FakeRecordImagePickerService(photos),
-          bootstrapApiService: _FakeBootstrapApiService(_emptyBootstrapData()),
+          bootstrapApiService: _FakeBootstrapApiService(
+            _emptyBootstrapData(),
+          ),
         ),
       ),
     );
@@ -95,9 +99,9 @@ void main() {
       MaterialApp(
         home: RecordPage(
           authService: _FakeAuthService(),
-          imagePickerService: _FakeRecordImagePickerService(<RecordDraftPhoto>[
-            photo,
-          ]),
+          imagePickerService: _FakeRecordImagePickerService(
+            <RecordDraftPhoto>[photo],
+          ),
           bootstrapApiService: _FakeBootstrapApiService(_bootstrapData()),
         ),
       ),
@@ -115,10 +119,7 @@ void main() {
     await tester.tap(existingMode);
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('existing-building-search-field')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('existing-building-search-field')), findsOneWidget);
     expect(find.text('1枚'), findsOneWidget);
 
     final Finder newMode = find.byKey(const Key('record-building-mode-new'));
@@ -158,10 +159,7 @@ void main() {
     await tester.tap(buildingOption);
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('selected-existing-building-panel')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('selected-existing-building-panel')), findsOneWidget);
     expect(find.text('第一ビル'), findsWidgets);
     expect(find.text('設計第一室'), findsOneWidget);
     expect(find.text('営業第一部'), findsOneWidget);
@@ -182,7 +180,12 @@ BootstrapData _emptyBootstrapData() {
     stage: '2-2',
     buildings: const <Building>[],
     tags: const <BuildingTag>[],
-    counts: const BootstrapCounts(buildings: 0, visits: 0, photos: 0, tags: 0),
+    counts: const BootstrapCounts(
+      buildings: 0,
+      visits: 0,
+      photos: 0,
+      tags: 0,
+    ),
   );
 }
 
@@ -193,16 +196,16 @@ BootstrapData _bootstrapData() {
     schemaVersion: '1.0',
     stage: '2-2',
     buildings: <Building>[
-      Building(
+      const Building(
         buildingId: 'building-1',
         buildingName: '第一ビル',
         searchName: '第一ビル',
         latitude: null,
         longitude: null,
         address: '東京都千代田区',
-        designTags: const <String>['設計第一室'],
-        salesTags: const <String>['営業第一部'],
-        constructionTags: const <String>['当社施工'],
+        designTags: <String>['設計第一室'],
+        salesTags: <String>['営業第一部'],
+        constructionTags: <String>['当社施工'],
         driveFolderId: null,
         coverPhotoId: null,
         createdAt: null,
@@ -230,7 +233,12 @@ BootstrapData _bootstrapData() {
         order: 1,
       ),
     ],
-    counts: const BootstrapCounts(buildings: 1, visits: 0, photos: 0, tags: 3),
+    counts: const BootstrapCounts(
+      buildings: 1,
+      visits: 0,
+      photos: 0,
+      tags: 3,
+    ),
   );
 }
 
