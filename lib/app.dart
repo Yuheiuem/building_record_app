@@ -6,12 +6,19 @@ import 'package:go_router/go_router.dart';
 import 'core/config/app_config.dart';
 import 'core/routing/app_router.dart';
 import 'data/services/auth_service.dart';
+import 'data/services/bootstrap_api_service.dart';
 import 'data/services/google_auth_service.dart';
 
 class BuildingRecordApp extends StatefulWidget {
-  const BuildingRecordApp({super.key, this.authService, this.initialLocation});
+  const BuildingRecordApp({
+    super.key,
+    this.authService,
+    this.bootstrapApiService,
+    this.initialLocation,
+  });
 
   final AuthService? authService;
+  final BootstrapApiService? bootstrapApiService;
   final String? initialLocation;
 
   @override
@@ -28,6 +35,7 @@ class _BuildingRecordAppState extends State<BuildingRecordApp> {
     _authService = widget.authService ?? GoogleAuthService.instance;
     _router = createAppRouter(
       authService: _authService,
+      bootstrapApiService: widget.bootstrapApiService,
       initialLocation: widget.initialLocation,
     );
     unawaited(_authService.initialize());

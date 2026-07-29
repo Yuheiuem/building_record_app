@@ -1,13 +1,16 @@
 import 'package:building_record_app/app.dart';
 import 'package:building_record_app/core/routing/app_routes.dart';
+import 'package:building_record_app/data/models/bootstrap_data.dart';
+import 'package:building_record_app/data/models/building.dart';
+import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
+import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   testWidgets('未ログインではログイン画面へ移動する', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService.signedOut();
-
     await tester.pumpWidget(BuildingRecordApp(authService: authService));
     await tester.pumpAndSettle();
 
@@ -17,27 +20,25 @@ void main() {
 
   testWidgets('認証初期化中でも保護されたURLを保持する', (WidgetTester tester) async {
     final _FakeAuthService authService = _FakeAuthService.initializing();
-
     await tester.pumpWidget(
       BuildingRecordApp(
         authService: authService,
+        bootstrapApiService: _FakeBootstrapApiService(),
         initialLocation: AppRoutes.record,
       ),
     );
 
     await tester.pump();
-
     expect(find.text('ログイン状態を確認しています。'), findsOneWidget);
 
     authService.completeInitializationAsSignedOut();
     await tester.pumpAndSettle();
-
     expect(find.text('Googleアカウントでログイン'), findsOneWidget);
 
     authService.signIn();
     await tester.pumpAndSettle();
-
     expect(find.text('写真の下書き'), findsOneWidget);
+    expect(find.text('建物の指定'), findsOneWidget);
   });
 
   testWidgets('スマホ幅では記録を主操作にする', (WidgetTester tester) async {
@@ -140,4 +141,31 @@ class _FakeAuthService extends AuthService {
     _idToken = null;
     notifyListeners();
   }
+}
+
+class _FakeBootstrapApiService implements BootstrapApiService {
+  @override
+  Future<BootstrapData> getBootstrapData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+  }) async {
+    return BootstrapData(
+      requestId: requestId,
+      serverTime: DateTime.parse('2026-07-29T12:00:00+09:00'),
+      schemaVersion: '1.0',
+      stage: '2-2',
+      buildings: const <Building>[],
+      tags: const <BuildingTag>[],
+      counts: const BootstrapCounts(
+        buildings: 0,
+        visits: 0,
+        photos: 0,
+        tags: 0,
+      ),
+    );
+  }
+
+  @override
+  void close() {}
 }
