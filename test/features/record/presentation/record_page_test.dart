@@ -39,7 +39,7 @@ void main() {
     expect(find.text('今回の訪問'), findsOneWidget);
     expect(find.byKey(const Key('visit-impression-field')), findsOneWidget);
     expect(find.byKey(const Key('capture-current-location')), findsOneWidget);
-    expect(find.text('段階 3-4A / v0.12.0'), findsOneWidget);
+    expect(find.text('段階 3-4B / v0.13.0'), findsOneWidget);
   });
 
   testWidgets('複数写真を選択して個別に削除できる', (WidgetTester tester) async {
@@ -402,9 +402,9 @@ BootstrapData _bootstrapData() {
         latitude: 35.681236,
         longitude: 139.767125,
         address: '東京都千代田区',
-        designTags: <String>['設計第一室'],
-        salesTags: <String>['営業第一部'],
-        constructionTags: <String>['当社施工'],
+        designTags: <String>['tag-design-1'],
+        salesTags: <String>['tag-sales-1'],
+        constructionTags: <String>['tag-con-1'],
         driveFolderId: null,
         coverPhotoId: null,
         createdAt: null,

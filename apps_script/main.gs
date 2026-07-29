@@ -54,6 +54,24 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'beginRecord':
+        return handleBeginRecord(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'uploadPhoto':
+        return handleUploadPhoto(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'finalizeRecord':
+        return handleFinalizeRecord(
+          requestId,
+          request.payload,
+          authContext
+        );
       default:
         throw createApiError_(
           'VALIDATION_ERROR',
@@ -93,7 +111,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '3-4A',
+      stage: '3-4B',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -194,7 +212,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.12.0',
+        clientVersion: 'v0.13.0',
         payload: {}
       })
     }

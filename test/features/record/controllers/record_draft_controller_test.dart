@@ -5,11 +5,13 @@ import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/models/record_draft_location.dart';
 import 'package:building_record_app/data/models/record_draft_photo.dart';
+import 'package:building_record_app/data/models/record_submission_result.dart';
 import 'package:building_record_app/data/models/tag_creation_result.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/record_image_picker_service.dart';
 import 'package:building_record_app/data/services/record_location_service.dart';
+import 'package:building_record_app/data/services/record_submission_api_service.dart';
 import 'package:building_record_app/data/services/tag_api_service.dart';
 import 'package:building_record_app/features/record/controllers/record_draft_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -113,7 +115,7 @@ void main() {
     controller.selectExistingBuilding('building-2');
     expect(controller.selectedExistingBuilding?.buildingName, '第二工場');
     expect(controller.selectedExistingBuilding?.constructionTags, <String>[
-      '鹿島施工',
+      'tag-con-2',
     ]);
   });
 
@@ -283,6 +285,73 @@ void main() {
       isFalse,
     );
   });
+
+  test('建物・訪問・複数写真を順番に保存できる', () async {
+    final _FakeRecordSubmissionApiService submissionService =
+        _FakeRecordSubmissionApiService();
+    final RecordDraftController controller = _createController(
+      photos: <RecordDraftPhoto>[
+        _photo(id: 'photo-save-1', fileName: 'one.jpg', byteSize: 1200),
+        _photo(id: 'photo-save-2', fileName: 'two.png', byteSize: 2400),
+      ],
+      bootstrapData: _bootstrapData(),
+      recordSubmissionApiService: submissionService,
+    );
+
+    await controller.loadBootstrapData();
+    await controller.addPhotos();
+    controller.setNewBuildingName('保存テスト建物');
+    controller.toggleBuildingTag(BuildingTagType.construction, 'tag-con-1');
+    controller.toggleTriggerTag('tag-trigger-1');
+    controller.setImpression('保存テストの感想');
+    await controller.acquireCurrentLocation();
+
+    await controller.submitRecord();
+
+    expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
+    expect(controller.uploadedPhotoCount, 2);
+    expect(submissionService.beginCallCount, 1);
+    expect(submissionService.finalizeCallCount, 1);
+    expect(submissionService.uploadCallCount['photo-save-1'], 1);
+    expect(submissionService.uploadCallCount['photo-save-2'], 1);
+    expect(submissionService.lastBuildingName, '保存テスト建物');
+    expect(submissionService.lastConstructionTagIds, <String>['tag-con-1']);
+    expect(submissionService.lastTriggerTagIds, <String>['tag-trigger-1']);
+  });
+
+  test('写真送信失敗後は失敗した写真だけ再送する', () async {
+    final _FakeRecordSubmissionApiService submissionService =
+        _FakeRecordSubmissionApiService(
+          failOncePhotoIds: <String>{'photo-retry-2'},
+        );
+    final RecordDraftController controller = _createController(
+      photos: <RecordDraftPhoto>[
+        _photo(id: 'photo-retry-1', fileName: 'one.jpg', byteSize: 1200),
+        _photo(id: 'photo-retry-2', fileName: 'two.jpg', byteSize: 2400),
+      ],
+      recordSubmissionApiService: submissionService,
+    );
+
+    await controller.addPhotos();
+    controller.setNewBuildingName('再送テスト建物');
+    await controller.acquireCurrentLocation();
+
+    await controller.submitRecord();
+
+    expect(controller.submissionPhase, RecordSubmissionPhase.failed);
+    expect(controller.uploadedPhotoCount, 1);
+    expect(controller.failedPhotoCount, 1);
+    expect(submissionService.finalizeCallCount, 0);
+
+    await controller.submitRecord();
+
+    expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
+    expect(controller.uploadedPhotoCount, 2);
+    expect(submissionService.beginCallCount, 1);
+    expect(submissionService.uploadCallCount['photo-retry-1'], 1);
+    expect(submissionService.uploadCallCount['photo-retry-2'], 2);
+    expect(submissionService.finalizeCallCount, 1);
+  });
 }
 
 RecordDraftController _createController({
@@ -290,6 +359,7 @@ RecordDraftController _createController({
   BootstrapData? bootstrapData,
   RecordLocationService? locationService,
   TagApiService? tagApiService,
+  RecordSubmissionApiService? recordSubmissionApiService,
 }) {
   return RecordDraftController(
     imagePickerService: _FakeRecordImagePickerService(photos),
@@ -301,6 +371,8 @@ RecordDraftController _createController({
         locationService ?? _FakeRecordLocationService(_gpsLocation()),
     tagApiService:
         tagApiService ?? _FakeTagApiService(_defaultTagCreationResult()),
+    recordSubmissionApiService:
+        recordSubmissionApiService ?? _FakeRecordSubmissionApiService(),
   );
 }
 
@@ -352,15 +424,15 @@ BootstrapData _bootstrapData() {
         address: '東京都千代田区',
         latitude: 35.681236,
         longitude: 139.767125,
-        designTags: const <String>['設計第一室'],
-        salesTags: const <String>['営業第一部'],
-        constructionTags: const <String>['当社施工'],
+        designTags: const <String>['tag-design-1'],
+        salesTags: const <String>['tag-sales-1'],
+        constructionTags: const <String>['tag-con-1'],
       ),
       _building(
         id: 'building-2',
         name: '第二工場',
         address: '神奈川県横浜市',
-        constructionTags: const <String>['鹿島施工'],
+        constructionTags: const <String>['tag-con-2'],
       ),
     ],
     tags: <BuildingTag>[
@@ -462,6 +534,111 @@ TagCreationResult _defaultTagCreationResult() {
     created: true,
     reactivated: false,
   );
+}
+
+class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
+  _FakeRecordSubmissionApiService({
+    Set<String> failOncePhotoIds = const <String>{},
+  }) : _remainingFailures = <String>{...failOncePhotoIds};
+
+  final Set<String> _remainingFailures;
+  final Map<String, int> uploadCallCount = <String, int>{};
+  int beginCallCount = 0;
+  int finalizeCallCount = 0;
+  String? lastBuildingName;
+  List<String>? lastConstructionTagIds;
+  List<String>? lastTriggerTagIds;
+  String? _buildingId;
+  String? _visitId;
+
+  @override
+  Future<BeginRecordResult> beginRecord({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingMode,
+    required String buildingId,
+    required String visitId,
+    required String? buildingName,
+    required List<String> designTagIds,
+    required List<String> salesTagIds,
+    required List<String> constructionTagIds,
+    required DateTime visitedAt,
+    required List<String> triggerTagIds,
+    required String impression,
+    required double latitude,
+    required double longitude,
+    required double? accuracyM,
+    required String locationSource,
+    required int expectedPhotoCount,
+  }) async {
+    beginCallCount += 1;
+    lastBuildingName = buildingName;
+    lastConstructionTagIds = constructionTagIds;
+    lastTriggerTagIds = triggerTagIds;
+    _buildingId = buildingId;
+    _visitId = visitId;
+    return BeginRecordResult(
+      buildingId: buildingId,
+      visitId: visitId,
+      expectedPhotoCount: expectedPhotoCount,
+      buildingCreated: buildingMode == 'new',
+      visitCreated: true,
+      reused: false,
+    );
+  }
+
+  @override
+  Future<UploadRecordPhotoResult> uploadPhoto({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String visitId,
+    required String photoId,
+    required String fileName,
+    required String mimeType,
+    required Uint8List bytes,
+    required DateTime takenAt,
+    required double latitude,
+    required double longitude,
+    required double? accuracyM,
+    required String locationSource,
+    required int displayOrder,
+  }) async {
+    uploadCallCount[photoId] = (uploadCallCount[photoId] ?? 0) + 1;
+    if (_remainingFailures.remove(photoId)) {
+      throw const RecordSubmissionApiException('テスト用の送信失敗');
+    }
+    return UploadRecordPhotoResult(
+      photoId: photoId,
+      storageFileId: 'storage-$photoId',
+      byteSize: bytes.length,
+      displayOrder: displayOrder,
+      reused: false,
+    );
+  }
+
+  @override
+  Future<FinalizeRecordResult> finalizeRecord({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String visitId,
+  }) async {
+    finalizeCallCount += 1;
+    return FinalizeRecordResult(
+      buildingId: _buildingId ?? buildingId,
+      visitId: _visitId ?? visitId,
+      photoCount: uploadCallCount.length,
+      status: 'completed',
+      reused: false,
+    );
+  }
+
+  @override
+  void close() {}
 }
 
 class _FakeTagApiService implements TagApiService {

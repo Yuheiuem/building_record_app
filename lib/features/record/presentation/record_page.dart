@@ -10,6 +10,7 @@ import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
 import '../../../data/services/record_location_service.dart';
+import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../controllers/record_draft_controller.dart';
@@ -21,6 +22,7 @@ class RecordPage extends StatefulWidget {
     this.bootstrapApiService,
     this.locationService,
     this.tagApiService,
+    this.recordSubmissionApiService,
     super.key,
   });
 
@@ -29,6 +31,7 @@ class RecordPage extends StatefulWidget {
   final BootstrapApiService? bootstrapApiService;
   final RecordLocationService? locationService;
   final TagApiService? tagApiService;
+  final RecordSubmissionApiService? recordSubmissionApiService;
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -40,6 +43,8 @@ class _RecordPageState extends State<RecordPage> {
   late final RecordLocationService _locationService;
   late final TagApiService _tagApiService;
   late final bool _ownsTagApiService;
+  late final RecordSubmissionApiService _recordSubmissionApiService;
+  late final bool _ownsRecordSubmissionApiService;
   late final RecordDraftController _controller;
 
   @override
@@ -52,6 +57,9 @@ class _RecordPageState extends State<RecordPage> {
         widget.locationService ?? GeolocatorRecordLocationService();
     _ownsTagApiService = widget.tagApiService == null;
     _tagApiService = widget.tagApiService ?? HttpTagApiService();
+    _ownsRecordSubmissionApiService = widget.recordSubmissionApiService == null;
+    _recordSubmissionApiService =
+        widget.recordSubmissionApiService ?? HttpRecordSubmissionApiService();
     _controller = RecordDraftController(
       imagePickerService:
           widget.imagePickerService ?? ImagePickerRecordImageService(),
@@ -59,6 +67,7 @@ class _RecordPageState extends State<RecordPage> {
       authService: widget.authService,
       locationService: _locationService,
       tagApiService: _tagApiService,
+      recordSubmissionApiService: _recordSubmissionApiService,
     );
     unawaited(_controller.loadBootstrapData());
   }
@@ -71,6 +80,9 @@ class _RecordPageState extends State<RecordPage> {
     }
     if (_ownsTagApiService) {
       _tagApiService.close();
+    }
+    if (_ownsRecordSubmissionApiService) {
+      _recordSubmissionApiService.close();
     }
     super.dispose();
   }
@@ -163,46 +175,60 @@ class _RecordPageState extends State<RecordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      _DraftHeader(
-                        isPicking: _controller.isPicking,
-                        hasPhotos: _controller.hasPhotos,
-                        onAddPhotos: _controller.addPhotos,
-                        onClearPhotos: _confirmClearPhotos,
-                      ),
-                      if (_controller.errorMessage != null) ...<Widget>[
-                        const SizedBox(height: 12),
-                        _MessagePanel(
-                          icon: Icons.error_outline,
-                          message: _controller.errorMessage!,
-                          isError: true,
+                      KeyedSubtree(
+                        key: ValueKey<int>(_controller.draftRevision),
+                        child: _DraftLock(
+                          locked: _controller.isDraftLocked,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              _DraftHeader(
+                                isPicking: _controller.isPicking,
+                                hasPhotos: _controller.hasPhotos,
+                                onAddPhotos: _controller.addPhotos,
+                                onClearPhotos: _confirmClearPhotos,
+                              ),
+                              if (_controller.errorMessage != null) ...<Widget>[
+                                const SizedBox(height: 12),
+                                _MessagePanel(
+                                  icon: Icons.error_outline,
+                                  message: _controller.errorMessage!,
+                                  isError: true,
+                                ),
+                              ],
+                              if (_controller.noticeMessage !=
+                                  null) ...<Widget>[
+                                const SizedBox(height: 12),
+                                _MessagePanel(
+                                  icon: Icons.check_circle_outline,
+                                  message: _controller.noticeMessage!,
+                                ),
+                              ],
+                              const SizedBox(height: 20),
+                              if (_controller.hasPhotos)
+                                _PhotoDraftSection(
+                                  photos: _controller.photos,
+                                  totalBytes: _controller.totalBytes,
+                                  onRemovePhoto: _controller.removePhoto,
+                                )
+                              else
+                                const _EmptyDraftPanel(),
+                              const SizedBox(height: 24),
+                              _BuildingDraftSection(
+                                controller: _controller,
+                                onAddTag: _showAddTagInput,
+                              ),
+                              const SizedBox(height: 24),
+                              _VisitDraftSection(
+                                controller: _controller,
+                                onAddTag: _showAddTagInput,
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                      if (_controller.noticeMessage != null) ...<Widget>[
-                        const SizedBox(height: 12),
-                        _MessagePanel(
-                          icon: Icons.check_circle_outline,
-                          message: _controller.noticeMessage!,
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                      if (_controller.hasPhotos)
-                        _PhotoDraftSection(
-                          photos: _controller.photos,
-                          totalBytes: _controller.totalBytes,
-                          onRemovePhoto: _controller.removePhoto,
-                        )
-                      else
-                        const _EmptyDraftPanel(),
-                      const SizedBox(height: 24),
-                      _BuildingDraftSection(
-                        controller: _controller,
-                        onAddTag: _showAddTagInput,
                       ),
                       const SizedBox(height: 24),
-                      _VisitDraftSection(
-                        controller: _controller,
-                        onAddTag: _showAddTagInput,
-                      ),
+                      _RecordSaveSection(controller: _controller),
                       const SizedBox(height: 24),
                       const AppVersionFooter(),
                     ],
@@ -212,6 +238,300 @@ class _RecordPageState extends State<RecordPage> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _DraftLock extends StatelessWidget {
+  const _DraftLock({required this.locked, required this.child});
+
+  final bool locked;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: locked,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: locked ? 0.72 : 1,
+        child: child,
+      ),
+    );
+  }
+}
+
+class _RecordSaveSection extends StatelessWidget {
+  const _RecordSaveSection({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final bool showPhotoProgress =
+        controller.isDraftLocked && controller.photos.isNotEmpty;
+    final String submitButtonLabel;
+    if (controller.submissionPhase == RecordSubmissionPhase.failed) {
+      submitButtonLabel = controller.failedPhotoCount > 0
+          ? '失敗した写真を再送'
+          : '保存を再試行';
+    } else if (controller.isSubmitting) {
+      submitButtonLabel = '保存しています';
+    } else {
+      submitButtonLabel = '記録を保存';
+    }
+
+    return Card(
+      key: const Key('record-save-section'),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.cloud_upload_outlined,
+                  color: colors.primary,
+                  size: 32,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '記録を保存',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('建物と訪問の下書きを作成し、写真を1枚ずつ非公開Driveへ保存します。'),
+            const SizedBox(height: 16),
+            _SubmissionStatusPanel(controller: controller),
+            if (showPhotoProgress) ...<Widget>[
+              const SizedBox(height: 16),
+              LinearProgressIndicator(
+                value:
+                    controller.submissionPhase ==
+                            RecordSubmissionPhase.starting ||
+                        controller.submissionPhase ==
+                            RecordSubmissionPhase.finalizing
+                    ? null
+                    : controller.submissionProgress,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '写真 ${controller.uploadedPhotoCount}/${controller.photoCount}枚を送信済み',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              ...controller.photos.map((RecordDraftPhoto photo) {
+                return _PhotoUploadProgressRow(
+                  photo: photo,
+                  status: controller.photoUploadStatus(photo.photoId),
+                );
+              }),
+            ],
+            if (controller.submissionErrorMessage != null) ...<Widget>[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colors.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Icon(Icons.error_outline, color: colors.error),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            controller.submissionErrorMessage!,
+                            style: TextStyle(
+                              color: colors.onErrorContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (controller.submissionErrorDetail != null) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Text(
+                        controller.submissionErrorDetail!,
+                        style: TextStyle(color: colors.onErrorContainer),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+            if (controller.submissionNoticeMessage != null) ...<Widget>[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(Icons.check_circle_outline, color: colors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        controller.submissionNoticeMessage!,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            if (controller.submissionSucceeded)
+              FilledButton.icon(
+                key: const Key('start-new-record'),
+                onPressed: controller.startNewRecord,
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('新しい記録を始める'),
+              )
+            else
+              FilledButton.icon(
+                key: const Key('submit-record'),
+                onPressed: controller.canSubmitRecord
+                    ? controller.submitRecord
+                    : null,
+                icon: controller.isSubmitting
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        controller.submissionPhase ==
+                                RecordSubmissionPhase.failed
+                            ? Icons.refresh_outlined
+                            : Icons.cloud_upload_outlined,
+                      ),
+                label: Text(submitButtonLabel),
+              ),
+            if (controller.isDraftLocked && !controller.submissionSucceeded)
+              const Padding(
+                padding: EdgeInsets.only(top: 10),
+                child: Text(
+                  '送信開始後は下書きを変更せず、同じボタンから再送してください。',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SubmissionStatusPanel extends StatelessWidget {
+  const _SubmissionStatusPanel({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ({IconData icon, String label}) details =
+        switch (controller.submissionPhase) {
+          RecordSubmissionPhase.idle => (
+            icon: Icons.edit_note_outlined,
+            label: '下書きの入力内容を確認してください。',
+          ),
+          RecordSubmissionPhase.starting => (
+            icon: Icons.inventory_2_outlined,
+            label: '建物と訪問の保存準備をしています。',
+          ),
+          RecordSubmissionPhase.uploading => (
+            icon: Icons.photo_library_outlined,
+            label: '写真を1枚ずつ送信しています。',
+          ),
+          RecordSubmissionPhase.finalizing => (
+            icon: Icons.fact_check_outlined,
+            label: '保存枚数を確認して記録を確定しています。',
+          ),
+          RecordSubmissionPhase.failed => (
+            icon: Icons.sync_problem_outlined,
+            label: '入力内容と送信済み写真を保持しています。',
+          ),
+          RecordSubmissionPhase.succeeded => (
+            icon: Icons.task_alt_outlined,
+            label: '記録の保存が完了しました。',
+          ),
+        };
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(details.icon),
+          const SizedBox(width: 10),
+          Expanded(child: Text(details.label)),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoUploadProgressRow extends StatelessWidget {
+  const _PhotoUploadProgressRow({required this.photo, required this.status});
+
+  final RecordDraftPhoto photo;
+  final RecordPhotoUploadStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final ({IconData icon, String label}) details = switch (status) {
+      RecordPhotoUploadStatus.pending => (
+        icon: Icons.schedule_outlined,
+        label: '未送信',
+      ),
+      RecordPhotoUploadStatus.uploading => (
+        icon: Icons.sync_outlined,
+        label: '送信中',
+      ),
+      RecordPhotoUploadStatus.uploaded => (
+        icon: Icons.check_circle_outline,
+        label: '送信済み',
+      ),
+      RecordPhotoUploadStatus.failed => (
+        icon: Icons.error_outline,
+        label: '再送待ち',
+      ),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: <Widget>[
+          Icon(details.icon, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              photo.fileName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(details.label),
+        ],
       ),
     );
   }
@@ -273,7 +593,7 @@ class _DraftHeader extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '写真・建物・訪問の下書きはまだ送信しません。新しく追加したタグだけはタグマスターへ保存されます。ブラウザを再読み込みすると下書きは消えます。',
+                      '「記録を保存」を押すまでは写真・建物・訪問を送信しません。新しく追加したタグだけはタグマスターへ保存されます。',
                     ),
                   ),
                 ],
@@ -927,11 +1247,20 @@ class _SelectedExistingBuildingCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          _ReadOnlyTagGroup(label: '設計タグ', values: building.designTags),
+          _ReadOnlyTagGroup(
+            label: '設計タグ',
+            values: controller.tagNamesForIds(building.designTags),
+          ),
           const SizedBox(height: 10),
-          _ReadOnlyTagGroup(label: '営業タグ', values: building.salesTags),
+          _ReadOnlyTagGroup(
+            label: '営業タグ',
+            values: controller.tagNamesForIds(building.salesTags),
+          ),
           const SizedBox(height: 10),
-          _ReadOnlyTagGroup(label: '施工タグ', values: building.constructionTags),
+          _ReadOnlyTagGroup(
+            label: '施工タグ',
+            values: controller.tagNamesForIds(building.constructionTags),
+          ),
           const SizedBox(height: 18),
           Text(
             'この建物へタグを追加',
@@ -1105,7 +1434,7 @@ class _VisitDraftSection extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'この段階では訪問情報も端末内の下書きです。地図での手動位置指定とサーバー保存は後続段階で追加します。',
+                      '写真は1枚ずつ送信します。途中で失敗した場合は、入力内容と送信済み写真を保持して失敗分だけ再送します。',
                     ),
                   ),
                 ],
