@@ -5,10 +5,12 @@ import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/models/record_draft_location.dart';
 import 'package:building_record_app/data/models/record_draft_photo.dart';
+import 'package:building_record_app/data/models/tag_creation_result.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/record_image_picker_service.dart';
 import 'package:building_record_app/data/services/record_location_service.dart';
+import 'package:building_record_app/data/services/tag_api_service.dart';
 import 'package:building_record_app/features/record/controllers/record_draft_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -171,12 +173,123 @@ void main() {
     expect(controller.visitLocation?.longitude, 139.767125);
     expect(controller.visitLocation?.accuracyM, isNull);
   });
+  test('新しいタグを追加すると候補へ反映して自動選択する', () async {
+    final BuildingTag createdTag = _tag(
+      id: 'tag-design-new',
+      type: BuildingTagType.design,
+      name: '新しい設計室',
+      order: 20,
+    );
+    final _FakeTagApiService tagService = _FakeTagApiService(
+      TagCreationResult(tag: createdTag, created: true, reactivated: false),
+    );
+    final RecordDraftController controller = _createController(
+      bootstrapData: _bootstrapData(),
+      tagApiService: tagService,
+    );
+
+    await controller.loadBootstrapData();
+    final String? error = await controller.createAndSelectTag(
+      BuildingTagType.design,
+      '新しい設計室',
+    );
+
+    expect(error, isNull);
+    expect(tagService.lastType, BuildingTagType.design);
+    expect(tagService.lastName, '新しい設計室');
+    expect(
+      controller
+          .tagsFor(BuildingTagType.design)
+          .map((BuildingTag tag) => tag.tagId),
+      contains('tag-design-new'),
+    );
+    expect(
+      controller.isTagSelected(BuildingTagType.design, 'tag-design-new'),
+      isTrue,
+    );
+    expect(controller.noticeMessage, '「新しい設計室」を追加して選択しました。');
+  });
+
+  test('同名の既存タグが返った場合は重複させず選択する', () async {
+    final BuildingTag existingTag = _tag(
+      id: 'tag-trigger-1',
+      type: BuildingTagType.trigger,
+      name: '営業の仕事',
+      order: 1,
+    );
+    final RecordDraftController controller = _createController(
+      bootstrapData: _bootstrapData(),
+      tagApiService: _FakeTagApiService(
+        TagCreationResult(tag: existingTag, created: false, reactivated: false),
+      ),
+    );
+
+    await controller.loadBootstrapData();
+    final String? error = await controller.createAndSelectTag(
+      BuildingTagType.trigger,
+      '営業の仕事',
+    );
+
+    expect(error, isNull);
+    expect(
+      controller
+          .tagsFor(BuildingTagType.trigger)
+          .where((BuildingTag tag) => tag.tagId == 'tag-trigger-1'),
+      hasLength(1),
+    );
+    expect(
+      controller.isTagSelected(BuildingTagType.trigger, 'tag-trigger-1'),
+      isTrue,
+    );
+    expect(controller.noticeMessage, '登録済みの「営業の仕事」を選択しました。');
+  });
+
+  test('既存建物で追加したタグは建物への追加予定として保持する', () async {
+    final BuildingTag createdTag = _tag(
+      id: 'tag-design-existing-new',
+      type: BuildingTagType.design,
+      name: '追加設計室',
+      order: 30,
+    );
+    final RecordDraftController controller = _createController(
+      bootstrapData: _bootstrapData(),
+      tagApiService: _FakeTagApiService(
+        TagCreationResult(tag: createdTag, created: true, reactivated: false),
+      ),
+    );
+
+    await controller.loadBootstrapData();
+    controller.setBuildingMode(RecordBuildingMode.existingBuilding);
+    controller.selectExistingBuilding('building-1');
+
+    final String? error = await controller.createAndSelectTag(
+      BuildingTagType.design,
+      '追加設計室',
+    );
+
+    expect(error, isNull);
+    expect(
+      controller.isExistingBuildingTagSelected(
+        BuildingTagType.design,
+        'tag-design-existing-new',
+      ),
+      isTrue,
+    );
+    expect(
+      controller.isTagSelected(
+        BuildingTagType.design,
+        'tag-design-existing-new',
+      ),
+      isFalse,
+    );
+  });
 }
 
 RecordDraftController _createController({
   List<RecordDraftPhoto> photos = const <RecordDraftPhoto>[],
   BootstrapData? bootstrapData,
   RecordLocationService? locationService,
+  TagApiService? tagApiService,
 }) {
   return RecordDraftController(
     imagePickerService: _FakeRecordImagePickerService(photos),
@@ -186,6 +299,8 @@ RecordDraftController _createController({
     authService: _FakeAuthService(),
     locationService:
         locationService ?? _FakeRecordLocationService(_gpsLocation()),
+    tagApiService:
+        tagApiService ?? _FakeTagApiService(_defaultTagCreationResult()),
   );
 }
 
@@ -334,6 +449,43 @@ BuildingTag _tag({
     createdAt: null,
     updatedAt: null,
   );
+}
+
+TagCreationResult _defaultTagCreationResult() {
+  return TagCreationResult(
+    tag: _tag(
+      id: 'tag-trigger-default',
+      type: BuildingTagType.trigger,
+      name: '既定タグ',
+      order: 999,
+    ),
+    created: true,
+    reactivated: false,
+  );
+}
+
+class _FakeTagApiService implements TagApiService {
+  _FakeTagApiService(this.result);
+
+  final TagCreationResult result;
+  BuildingTagType? lastType;
+  String? lastName;
+
+  @override
+  Future<TagCreationResult> createTag({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required BuildingTagType tagType,
+    required String tagName,
+  }) async {
+    lastType = tagType;
+    lastName = tagName;
+    return result;
+  }
+
+  @override
+  void close() {}
 }
 
 class _FakeRecordImagePickerService implements RecordImagePickerService {

@@ -9,10 +9,12 @@ import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
 import '../../../data/models/record_draft_location.dart';
 import '../../../data/models/record_draft_photo.dart';
+import '../../../data/models/tag_creation_result.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
 import '../../../data/services/record_location_service.dart';
+import '../../../data/services/tag_api_service.dart';
 
 enum RecordBuildingMode { newBuilding, existingBuilding }
 
@@ -22,15 +24,18 @@ class RecordDraftController extends ChangeNotifier {
     required BootstrapApiService bootstrapApiService,
     required AuthService authService,
     required RecordLocationService locationService,
+    required TagApiService tagApiService,
   }) : _imagePickerService = imagePickerService,
        _bootstrapApiService = bootstrapApiService,
        _authService = authService,
-       _locationService = locationService;
+       _locationService = locationService,
+       _tagApiService = tagApiService;
 
   final RecordImagePickerService _imagePickerService;
   final BootstrapApiService _bootstrapApiService;
   final AuthService _authService;
   final RecordLocationService _locationService;
+  final TagApiService _tagApiService;
 
   final List<RecordDraftPhoto> _photos = <RecordDraftPhoto>[];
   final List<Building> _buildings = <Building>[];
@@ -39,6 +44,10 @@ class RecordDraftController extends ChangeNotifier {
   final Set<String> _selectedSalesTagIds = <String>{};
   final Set<String> _selectedConstructionTagIds = <String>{};
   final Set<String> _selectedTriggerTagIds = <String>{};
+  final Set<String> _pendingExistingDesignTagIds = <String>{};
+  final Set<String> _pendingExistingSalesTagIds = <String>{};
+  final Set<String> _pendingExistingConstructionTagIds = <String>{};
+  final Set<BuildingTagType> _creatingTagTypes = <BuildingTagType>{};
 
   bool _isPicking = false;
   String? _errorMessage;
@@ -90,6 +99,8 @@ class RecordDraftController extends ChangeNotifier {
   String? get locationErrorMessage => _locationErrorMessage;
   String? get locationNoticeMessage => _locationNoticeMessage;
   bool get hasVisitLocation => _visitLocation != null;
+  bool isCreatingTag(BuildingTagType type) => _creatingTagTypes.contains(type);
+
   bool get canUseSelectedBuildingLocation {
     final Building? building = _selectedExistingBuilding;
     return _buildingMode == RecordBuildingMode.existingBuilding &&
@@ -134,6 +145,19 @@ class RecordDraftController extends ChangeNotifier {
     );
   }
 
+  bool isExistingBuildingTagSelected(BuildingTagType type, String tagId) {
+    return _pendingExistingTagIdsFor(type).contains(tagId);
+  }
+
+  List<BuildingTag> selectedExistingBuildingTagsFor(BuildingTagType type) {
+    final Set<String> selectedIds = _pendingExistingTagIdsFor(type);
+    return List<BuildingTag>.unmodifiable(
+      _tags.where((BuildingTag tag) {
+        return tag.tagType == type && selectedIds.contains(tag.tagId);
+      }),
+    );
+  }
+
   Future<void> loadBootstrapData() async {
     if (_isLoadingBootstrap) {
       return;
@@ -168,24 +192,8 @@ class RecordDraftController extends ChangeNotifier {
 
       _tags
         ..clear()
-        ..addAll(data.tags.where((BuildingTag tag) => tag.isActive))
-        ..sort((BuildingTag left, BuildingTag right) {
-          final int typeComparison = left.tagType.index.compareTo(
-            right.tagType.index,
-          );
-          if (typeComparison != 0) {
-            return typeComparison;
-          }
-
-          final int orderComparison = left.displayOrder.compareTo(
-            right.displayOrder,
-          );
-          if (orderComparison != 0) {
-            return orderComparison;
-          }
-
-          return left.tagName.compareTo(right.tagName);
-        });
+        ..addAll(data.tags.where((BuildingTag tag) => tag.isActive));
+      _sortTags();
 
       final String? selectedId = _selectedExistingBuilding?.buildingId;
       if (selectedId != null) {
@@ -196,6 +204,9 @@ class RecordDraftController extends ChangeNotifier {
       _removeUnavailableTagIds(_selectedSalesTagIds);
       _removeUnavailableTagIds(_selectedConstructionTagIds);
       _removeUnavailableTagIds(_selectedTriggerTagIds);
+      _removeUnavailableTagIds(_pendingExistingDesignTagIds);
+      _removeUnavailableTagIds(_pendingExistingSalesTagIds);
+      _removeUnavailableTagIds(_pendingExistingConstructionTagIds);
       _hasLoadedBootstrap = true;
     } on BootstrapApiException catch (error) {
       _bootstrapErrorMessage = error.message;
@@ -322,6 +333,20 @@ class RecordDraftController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleExistingBuildingTag(BuildingTagType type, String tagId) {
+    if (type == BuildingTagType.trigger || _selectedExistingBuilding == null) {
+      return;
+    }
+
+    final Set<String> selectedIds = _pendingExistingTagIdsFor(type);
+    if (selectedIds.contains(tagId)) {
+      selectedIds.remove(tagId);
+    } else {
+      selectedIds.add(tagId);
+    }
+    notifyListeners();
+  }
+
   void setBuildingSearchQuery(String value) {
     if (_buildingSearchQuery == value) {
       return;
@@ -338,6 +363,7 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _selectedExistingBuilding = building;
+    _clearPendingExistingBuildingTags();
     if (_visitLocation?.source == RecordLocationSource.buildingFallback) {
       _setSelectedBuildingFallbackLocation(notify: false);
     }
@@ -350,6 +376,7 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _selectedExistingBuilding = null;
+    _clearPendingExistingBuildingTags();
     if (_visitLocation?.source == RecordLocationSource.buildingFallback) {
       _visitLocation = null;
       _locationNoticeMessage = '建物の代表位置を解除しました。';
@@ -375,6 +402,68 @@ class RecordDraftController extends ChangeNotifier {
 
   void setImpression(String value) {
     _impression = value;
+  }
+
+  Future<String?> createAndSelectTag(
+    BuildingTagType type,
+    String rawTagName,
+  ) async {
+    final String tagName = rawTagName.trim();
+    if (tagName.isEmpty) {
+      return 'タグ名を入力してください。';
+    }
+    if (tagName.runes.length > 80) {
+      return 'タグ名は80文字以内で入力してください。';
+    }
+    if (_creatingTagTypes.contains(type)) {
+      return 'タグを追加しています。しばらくお待ちください。';
+    }
+
+    final String? idToken = _authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      return 'Googleログイン情報を取得できませんでした。';
+    }
+
+    _creatingTagTypes.add(type);
+    _errorMessage = null;
+    _noticeMessage = null;
+    notifyListeners();
+
+    try {
+      final TagCreationResult result = await _tagApiService.createTag(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        tagType: type,
+        tagName: tagName,
+      );
+
+      if (result.tag.tagType != type) {
+        return '追加したタグの種類が一致しません。';
+      }
+
+      _upsertTag(result.tag);
+      _tagIdsForCurrentContext(type).add(result.tag.tagId);
+
+      if (result.created) {
+        _noticeMessage = '「${result.tag.tagName}」を追加して選択しました。';
+      } else if (result.reactivated) {
+        _noticeMessage = '「${result.tag.tagName}」を再有効化して選択しました。';
+      } else {
+        _noticeMessage = '登録済みの「${result.tag.tagName}」を選択しました。';
+      }
+      return null;
+    } on TagApiException catch (error) {
+      _errorMessage = error.message;
+      return error.message;
+    } catch (_) {
+      const String message = 'タグを追加できませんでした。もう一度お試しください。';
+      _errorMessage = message;
+      return message;
+    } finally {
+      _creatingTagTypes.remove(type);
+      notifyListeners();
+    }
   }
 
   Future<void> acquireCurrentLocation() async {
@@ -442,6 +531,63 @@ class RecordDraftController extends ChangeNotifier {
     if (notify) {
       notifyListeners();
     }
+  }
+
+  void _upsertTag(BuildingTag tag) {
+    _tags.removeWhere((BuildingTag existing) {
+      return existing.tagId == tag.tagId ||
+          (existing.tagType == tag.tagType &&
+              existing.normalizedName == tag.normalizedName);
+    });
+    if (tag.isActive) {
+      _tags.add(tag);
+    }
+    _sortTags();
+  }
+
+  void _sortTags() {
+    _tags.sort((BuildingTag left, BuildingTag right) {
+      final int typeComparison = left.tagType.index.compareTo(
+        right.tagType.index,
+      );
+      if (typeComparison != 0) {
+        return typeComparison;
+      }
+
+      final int orderComparison = left.displayOrder.compareTo(
+        right.displayOrder,
+      );
+      if (orderComparison != 0) {
+        return orderComparison;
+      }
+
+      return left.tagName.compareTo(right.tagName);
+    });
+  }
+
+  Set<String> _tagIdsForCurrentContext(BuildingTagType type) {
+    if (type == BuildingTagType.trigger) {
+      return _selectedTriggerTagIds;
+    }
+    if (_buildingMode == RecordBuildingMode.existingBuilding) {
+      return _pendingExistingTagIdsFor(type);
+    }
+    return _tagIdsFor(type);
+  }
+
+  Set<String> _pendingExistingTagIdsFor(BuildingTagType type) {
+    return switch (type) {
+      BuildingTagType.design => _pendingExistingDesignTagIds,
+      BuildingTagType.sales => _pendingExistingSalesTagIds,
+      BuildingTagType.construction => _pendingExistingConstructionTagIds,
+      BuildingTagType.trigger => _selectedTriggerTagIds,
+    };
+  }
+
+  void _clearPendingExistingBuildingTags() {
+    _pendingExistingDesignTagIds.clear();
+    _pendingExistingSalesTagIds.clear();
+    _pendingExistingConstructionTagIds.clear();
   }
 
   Set<String> _tagIdsFor(BuildingTagType type) {

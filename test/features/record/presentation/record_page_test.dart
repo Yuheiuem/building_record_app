@@ -6,10 +6,12 @@ import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/models/record_draft_location.dart';
 import 'package:building_record_app/data/models/record_draft_photo.dart';
+import 'package:building_record_app/data/models/tag_creation_result.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/record_image_picker_service.dart';
 import 'package:building_record_app/data/services/record_location_service.dart';
+import 'package:building_record_app/data/services/tag_api_service.dart';
 import 'package:building_record_app/features/record/presentation/record_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,7 +39,7 @@ void main() {
     expect(find.text('今回の訪問'), findsOneWidget);
     expect(find.byKey(const Key('visit-impression-field')), findsOneWidget);
     expect(find.byKey(const Key('capture-current-location')), findsOneWidget);
-    expect(find.text('段階 3-3 / v0.11.0'), findsOneWidget);
+    expect(find.text('段階 3-4A / v0.12.0'), findsOneWidget);
   });
 
   testWidgets('複数写真を選択して個別に削除できる', (WidgetTester tester) async {
@@ -174,7 +176,7 @@ void main() {
     expect(find.text('設計第一室'), findsOneWidget);
     expect(find.text('営業第一部'), findsOneWidget);
     expect(find.text('当社施工'), findsOneWidget);
-    expect(find.text('既存建物のタグはこの画面では変更できません。'), findsOneWidget);
+    expect(find.text('登録済みタグの削除・変更はできません。追加するタグは下で選べます。'), findsOneWidget);
   });
 
   testWidgets('きっかけタグと感想を入力し現在地を取得できる', (WidgetTester tester) async {
@@ -190,6 +192,13 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+
+    final Finder triggerSelector = find.byKey(
+      const PageStorageKey<String>('tag-selector-trigger'),
+    );
+    await tester.ensureVisible(triggerSelector);
+    await tester.tap(triggerSelector);
     await tester.pumpAndSettle();
 
     final Finder triggerChip = find.byKey(
@@ -259,6 +268,97 @@ void main() {
 
     expect(find.text('建物の代表位置'), findsOneWidget);
     expect(find.text('未設定'), findsOneWidget);
+  });
+  testWidgets('タグ候補は折りたたみ、選択後は要約へ表示する', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RecordPage(
+          authService: _FakeAuthService(),
+          imagePickerService: const _FakeRecordImagePickerService(
+            <RecordDraftPhoto>[],
+          ),
+          bootstrapApiService: _FakeBootstrapApiService(_bootstrapData()),
+          locationService: _FakeRecordLocationService(_gpsLocation()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder selector = find.byKey(
+      const PageStorageKey<String>('tag-selector-trigger'),
+    );
+    await tester.ensureVisible(selector);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+
+    final Finder chip = find.byKey(
+      const Key('visit-trigger-tag-tag-trigger-1'),
+    );
+    await tester.tap(chip);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('selected-tag-summary-trigger')),
+      findsOneWidget,
+    );
+    expect(find.text('営業の仕事'), findsWidgets);
+  });
+
+  testWidgets('記録画面内でタグを追加して自動選択できる', (WidgetTester tester) async {
+    final _FakeTagApiService tagService = _FakeTagApiService(
+      TagCreationResult(
+        tag: _tag(
+          id: 'tag-trigger-new',
+          type: BuildingTagType.trigger,
+          name: '現場見学',
+          order: 30,
+        ),
+        created: true,
+        reactivated: false,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RecordPage(
+          authService: _FakeAuthService(),
+          imagePickerService: const _FakeRecordImagePickerService(
+            <RecordDraftPhoto>[],
+          ),
+          bootstrapApiService: _FakeBootstrapApiService(_bootstrapData()),
+          locationService: _FakeRecordLocationService(_gpsLocation()),
+          tagApiService: tagService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final Finder selector = find.byKey(
+      const PageStorageKey<String>('tag-selector-trigger'),
+    );
+    await tester.ensureVisible(selector);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+
+    final Finder addButton = find.byKey(const Key('add-tag-trigger'));
+    await tester.ensureVisible(addButton);
+    await tester.tap(addButton);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('new-tag-name-trigger')),
+      '現場見学',
+    );
+    await tester.tap(find.byKey(const Key('submit-create-tag-trigger')));
+    await tester.pumpAndSettle();
+
+    expect(tagService.lastType, BuildingTagType.trigger);
+    expect(tagService.lastName, '現場見学');
+    expect(find.text('現場見学'), findsWidgets);
+    expect(
+      find.byKey(const Key('visit-trigger-tag-tag-trigger-new')),
+      findsOneWidget,
+    );
   });
 }
 
@@ -364,6 +464,30 @@ BuildingTag _tag({
     createdAt: null,
     updatedAt: null,
   );
+}
+
+class _FakeTagApiService implements TagApiService {
+  _FakeTagApiService(this.result);
+
+  final TagCreationResult result;
+  BuildingTagType? lastType;
+  String? lastName;
+
+  @override
+  Future<TagCreationResult> createTag({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required BuildingTagType tagType,
+    required String tagName,
+  }) async {
+    lastType = tagType;
+    lastName = tagName;
+    return result;
+  }
+
+  @override
+  void close() {}
 }
 
 class _FakeRecordImagePickerService implements RecordImagePickerService {

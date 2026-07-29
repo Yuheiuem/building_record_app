@@ -422,3 +422,259 @@ function testSeedInitialTags() {
   console.log('2回目: ' + JSON.stringify(secondResult));
   console.log('有効タグ件数: ' + activeTags.length);
 }
+
+/**
+ * 記録画面からタグを追加し、既存の同名タグがあれば再利用する。
+ *
+ * @param {string|null} requestId
+ * @param {Object} payload
+ * @param {{subject: string, email: string}} authContext
+ * @return {GoogleAppsScript.Content.TextOutput}
+ */
+function handleCreateTag(requestId, payload, authContext) {
+  requireAuthenticatedContext_(authContext);
+
+  var safePayload = payload && typeof payload === 'object'
+    ? payload
+    : {};
+  var tagType = getOptionalString(safePayload.tagType);
+  var tagName = getOptionalString(safePayload.tagName);
+
+  if (tagType === null) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      'タグ種類を指定してください。'
+    );
+  }
+  requireSupportedTagType_(tagType);
+
+  if (tagName === null) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      'タグ名を入力してください。'
+    );
+  }
+  if (Array.from(tagName).length > 80) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      'タグ名は80文字以内で入力してください。'
+    );
+  }
+
+  var result = createOrReactivateTag_(tagType, tagName);
+
+  return createApiResponse(
+    true,
+    requestId,
+    result,
+    null,
+    null
+  );
+}
+
+/**
+ * 同じ種類・正規化名のタグを再利用し、なければ新規作成する。
+ * 無効化済みのタグが一致した場合は同じtagIdのまま再有効化する。
+ *
+ * @param {string} tagType
+ * @param {string} tagName
+ * @return {{tag: Object, created: boolean, reactivated: boolean}}
+ */
+function createOrReactivateTag_(tagType, tagName) {
+  setupDataSpreadsheet();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    var spreadsheet = getDataSpreadsheet_();
+    var sheet = spreadsheet.getSheetByName('Tags');
+    var definition = findSheetDefinition_('Tags');
+
+    if (sheet === null) {
+      throw createApiError_(
+        'INTERNAL_ERROR',
+        'Tagsシートがありません。'
+      );
+    }
+
+    var normalizedName = normalizeTagName_(tagName);
+    if (normalizedName === '') {
+      throw createApiError_(
+        'VALIDATION_ERROR',
+        'タグ名を入力してください。'
+      );
+    }
+
+    var records = readExistingTagRecords_(
+      sheet,
+      definition.headers.length
+    );
+    var existing = null;
+
+    for (var i = 0; i < records.length; i += 1) {
+      var record = records[i];
+      if (
+        record.tagType === tagType &&
+        record.normalizedName === normalizedName
+      ) {
+        existing = record;
+        break;
+      }
+    }
+
+    var now = new Date();
+
+    if (existing !== null) {
+      var wasActive = sheetBoolean_(existing.values[5]);
+      if (!wasActive) {
+        existing.values[5] = true;
+        existing.values[7] = now;
+        sheet
+          .getRange(
+            existing.rowNumber,
+            1,
+            1,
+            definition.headers.length
+          )
+          .setValues([existing.values]);
+      }
+
+      return {
+        tag: tagApiObjectFromRow_(existing.values),
+        created: false,
+        reactivated: !wasActive
+      };
+    }
+
+    var displayOrder = nextTagDisplayOrder_(records, tagType);
+    var row = [
+      'tag-' + tagType + '-' + Utilities.getUuid(),
+      tagType,
+      tagName,
+      normalizedName,
+      displayOrder,
+      true,
+      now,
+      now
+    ];
+
+    sheet
+      .getRange(
+        sheet.getLastRow() + 1,
+        1,
+        1,
+        definition.headers.length
+      )
+      .setValues([row]);
+
+    return {
+      tag: tagApiObjectFromRow_(row),
+      created: true,
+      reactivated: false
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Tagsシートの行をAPI返却用Objectへ変換する。
+ *
+ * @param {Array<*>} row
+ * @return {Object}
+ */
+function tagApiObjectFromRow_(row) {
+  var tagId = optionalSheetString_(row[0]);
+  var tagType = optionalSheetString_(row[1]);
+  var tagName = optionalSheetString_(row[2]);
+
+  if (tagId === null || tagType === null || tagName === null) {
+    throw createApiError_(
+      'INTERNAL_ERROR',
+      'Tagsシートに必須項目がない行があります。'
+    );
+  }
+
+  requireSupportedTagType_(tagType);
+
+  return {
+    tagId: tagId,
+    tagType: tagType,
+    tagName: tagName,
+    normalizedName: optionalSheetString_(row[3])
+      || normalizeTagName_(tagName),
+    displayOrder: optionalSheetNumber_(row[4]) || 0,
+    isActive: sheetBoolean_(row[5]),
+    createdAt: sheetDateTime_(row[6]),
+    updatedAt: sheetDateTime_(row[7])
+  };
+}
+
+/**
+ * 同じ種類の末尾へ追加するための表示順を返す。
+ *
+ * @param {Object[]} records
+ * @param {string} tagType
+ * @return {number}
+ */
+function nextTagDisplayOrder_(records, tagType) {
+  var maximum = 0;
+
+  records.forEach(function(record) {
+    if (record.tagType !== tagType) {
+      return;
+    }
+
+    var value = Number(record.values[4]);
+    if (isFinite(value) && value > maximum) {
+      maximum = value;
+    }
+  });
+
+  return maximum + 10;
+}
+
+/**
+ * Apps Scriptエディタからタグ追加と重複再利用を確認する。
+ * テスト用タグは確認後に削除する。
+ */
+function testCreateTag() {
+  setupDataSpreadsheet();
+
+  var testName = 'APIテストタグ-' + new Date().getTime();
+  var first = createOrReactivateTag_('trigger', testName);
+  var second = createOrReactivateTag_('trigger', testName);
+
+  if (!first.created || second.created) {
+    throw createApiError_(
+      'INTERNAL_ERROR',
+      'タグの重複防止テストに失敗しました。'
+    );
+  }
+  if (first.tag.tagId !== second.tag.tagId) {
+    throw createApiError_(
+      'INTERNAL_ERROR',
+      '同名タグで同じtagIdが再利用されませんでした。'
+    );
+  }
+
+  var spreadsheet = getDataSpreadsheet_();
+  var sheet = spreadsheet.getSheetByName('Tags');
+  var definition = findSheetDefinition_('Tags');
+  var records = readExistingTagRecords_(
+    sheet,
+    definition.headers.length
+  );
+
+  records.forEach(function(record) {
+    if (record.tagId === first.tag.tagId && record.rowNumber !== null) {
+      sheet.deleteRow(record.rowNumber);
+    }
+  });
+
+  console.log(JSON.stringify({
+    first: first,
+    second: second
+  }));
+}

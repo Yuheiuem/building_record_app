@@ -10,6 +10,7 @@ import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
 import '../../../data/services/record_location_service.dart';
+import '../../../data/services/tag_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../controllers/record_draft_controller.dart';
 
@@ -19,6 +20,7 @@ class RecordPage extends StatefulWidget {
     this.imagePickerService,
     this.bootstrapApiService,
     this.locationService,
+    this.tagApiService,
     super.key,
   });
 
@@ -26,6 +28,7 @@ class RecordPage extends StatefulWidget {
   final RecordImagePickerService? imagePickerService;
   final BootstrapApiService? bootstrapApiService;
   final RecordLocationService? locationService;
+  final TagApiService? tagApiService;
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -35,6 +38,8 @@ class _RecordPageState extends State<RecordPage> {
   late final BootstrapApiService _bootstrapApiService;
   late final bool _ownsBootstrapApiService;
   late final RecordLocationService _locationService;
+  late final TagApiService _tagApiService;
+  late final bool _ownsTagApiService;
   late final RecordDraftController _controller;
 
   @override
@@ -45,12 +50,15 @@ class _RecordPageState extends State<RecordPage> {
         widget.bootstrapApiService ?? HttpBootstrapApiService();
     _locationService =
         widget.locationService ?? GeolocatorRecordLocationService();
+    _ownsTagApiService = widget.tagApiService == null;
+    _tagApiService = widget.tagApiService ?? HttpTagApiService();
     _controller = RecordDraftController(
       imagePickerService:
           widget.imagePickerService ?? ImagePickerRecordImageService(),
       bootstrapApiService: _bootstrapApiService,
       authService: widget.authService,
       locationService: _locationService,
+      tagApiService: _tagApiService,
     );
     unawaited(_controller.loadBootstrapData());
   }
@@ -60,6 +68,9 @@ class _RecordPageState extends State<RecordPage> {
     _controller.dispose();
     if (_ownsBootstrapApiService) {
       _bootstrapApiService.close();
+    }
+    if (_ownsTagApiService) {
+      _tagApiService.close();
     }
     super.dispose();
   }
@@ -88,6 +99,49 @@ class _RecordPageState extends State<RecordPage> {
     if (shouldClear == true) {
       _controller.clearPhotos();
     }
+  }
+
+  Future<void> _showAddTagInput(BuildingTagType type) async {
+    if (MediaQuery.sizeOf(context).width < 600) {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (BuildContext context) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+            ),
+            child: _AddTagForm(
+              type: type,
+              controller: _controller,
+              showHeading: true,
+            ),
+          );
+        },
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('${type.displayName}タグを追加'),
+          content: SizedBox(
+            width: 420,
+            child: _AddTagForm(
+              type: type,
+              controller: _controller,
+              showHeading: false,
+            ),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -140,9 +194,15 @@ class _RecordPageState extends State<RecordPage> {
                       else
                         const _EmptyDraftPanel(),
                       const SizedBox(height: 24),
-                      _BuildingDraftSection(controller: _controller),
+                      _BuildingDraftSection(
+                        controller: _controller,
+                        onAddTag: _showAddTagInput,
+                      ),
                       const SizedBox(height: 24),
-                      _VisitDraftSection(controller: _controller),
+                      _VisitDraftSection(
+                        controller: _controller,
+                        onAddTag: _showAddTagInput,
+                      ),
                       const SizedBox(height: 24),
                       const AppVersionFooter(),
                     ],
@@ -213,7 +273,7 @@ class _DraftHeader extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'この段階ではGoogle Sheets・Driveへ送信しません。写真と建物情報はブラウザを再読み込みすると消えます。',
+                      '写真・建物・訪問の下書きはまだ送信しません。新しく追加したタグだけはタグマスターへ保存されます。ブラウザを再読み込みすると下書きは消えます。',
                     ),
                   ),
                 ],
@@ -258,9 +318,13 @@ class _DraftHeader extends StatelessWidget {
 }
 
 class _BuildingDraftSection extends StatelessWidget {
-  const _BuildingDraftSection({required this.controller});
+  const _BuildingDraftSection({
+    required this.controller,
+    required this.onAddTag,
+  });
 
   final RecordDraftController controller;
+  final ValueChanged<BuildingTagType> onAddTag;
 
   @override
   Widget build(BuildContext context) {
@@ -338,8 +402,14 @@ class _BuildingDraftSection extends StatelessWidget {
               )
             else if (controller.hasLoadedBootstrap)
               controller.buildingMode == RecordBuildingMode.newBuilding
-                  ? _NewBuildingDraftForm(controller: controller)
-                  : _ExistingBuildingDraftForm(controller: controller)
+                  ? _NewBuildingDraftForm(
+                      controller: controller,
+                      onAddTag: onAddTag,
+                    )
+                  : _ExistingBuildingDraftForm(
+                      controller: controller,
+                      onAddTag: onAddTag,
+                    )
             else
               const _BootstrapLoadingPanel(),
           ],
@@ -398,9 +468,13 @@ class _BootstrapErrorPanel extends StatelessWidget {
 }
 
 class _NewBuildingDraftForm extends StatelessWidget {
-  const _NewBuildingDraftForm({required this.controller});
+  const _NewBuildingDraftForm({
+    required this.controller,
+    required this.onAddTag,
+  });
 
   final RecordDraftController controller;
+  final ValueChanged<BuildingTagType> onAddTag;
 
   @override
   Widget build(BuildContext context) {
@@ -420,81 +494,287 @@ class _NewBuildingDraftForm extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        _EditableTagGroup(
+        _TagSelectorAccordion(
           type: BuildingTagType.design,
           tags: controller.tagsFor(BuildingTagType.design),
           controller: controller,
+          chipKeyPrefix: 'new-building-tag-design',
+          onToggleTag: (String tagId) {
+            controller.toggleBuildingTag(BuildingTagType.design, tagId);
+          },
+          onAddTag: () => onAddTag(BuildingTagType.design),
         ),
         const SizedBox(height: 16),
-        _EditableTagGroup(
+        _TagSelectorAccordion(
           type: BuildingTagType.sales,
           tags: controller.tagsFor(BuildingTagType.sales),
           controller: controller,
+          chipKeyPrefix: 'new-building-tag-sales',
+          onToggleTag: (String tagId) {
+            controller.toggleBuildingTag(BuildingTagType.sales, tagId);
+          },
+          onAddTag: () => onAddTag(BuildingTagType.sales),
         ),
         const SizedBox(height: 16),
-        _EditableTagGroup(
+        _TagSelectorAccordion(
           type: BuildingTagType.construction,
           tags: controller.tagsFor(BuildingTagType.construction),
           controller: controller,
+          chipKeyPrefix: 'new-building-tag-construction',
+          onToggleTag: (String tagId) {
+            controller.toggleBuildingTag(BuildingTagType.construction, tagId);
+          },
+          onAddTag: () => onAddTag(BuildingTagType.construction),
         ),
       ],
     );
   }
 }
 
-class _EditableTagGroup extends StatelessWidget {
-  const _EditableTagGroup({
+class _TagSelectorAccordion extends StatelessWidget {
+  const _TagSelectorAccordion({
     required this.type,
     required this.tags,
     required this.controller,
+    required this.chipKeyPrefix,
+    required this.onToggleTag,
+    required this.onAddTag,
+    this.existingBuildingSelection = false,
+    this.title,
+    this.scopeLabel,
   });
 
   final BuildingTagType type;
   final List<BuildingTag> tags;
   final RecordDraftController controller;
+  final String chipKeyPrefix;
+  final ValueChanged<String> onToggleTag;
+  final VoidCallback onAddTag;
+  final bool existingBuildingSelection;
+  final String? title;
+  final String? scopeLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Text(
-          '${type.displayName}タグ',
+    final List<BuildingTag> selectedTags = existingBuildingSelection
+        ? controller.selectedExistingBuildingTagsFor(type)
+        : controller.selectedTagsFor(type);
+    final String selectionSummary = selectedTags.isEmpty
+        ? '未選択'
+        : selectedTags.map((BuildingTag tag) => tag.tagName).join('、');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: ExpansionTile(
+        key: PageStorageKey<String>('tag-selector-${type.apiValue}'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shape: const RoundedRectangleBorder(),
+        collapsedShape: const RoundedRectangleBorder(),
+        title: Text(
+          title ?? '${type.displayName}タグ',
           style: Theme.of(
             context,
           ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
-        const SizedBox(height: 4),
-        Text(type.scopeLabel, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 8),
-        if (tags.isEmpty)
-          const Text('登録済みの候補がありません。')
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: tags
-                .map((BuildingTag tag) {
-                  return FilterChip(
-                    key: Key('new-building-tag-${type.apiValue}-${tag.tagId}'),
-                    selected: controller.isTagSelected(type, tag.tagId),
-                    onSelected: (bool selected) {
-                      controller.toggleBuildingTag(type, tag.tagId);
-                    },
-                    label: Text(tag.tagName),
-                  );
-                })
-                .toList(growable: false),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(scopeLabel ?? type.scopeLabel),
+            const SizedBox(height: 2),
+            Text(
+              selectionSummary,
+              key: Key('selected-tag-summary-${type.apiValue}'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: selectedTags.isEmpty
+                    ? Theme.of(context).colorScheme.onSurfaceVariant
+                    : Theme.of(context).colorScheme.primary,
+                fontWeight: selectedTags.isEmpty
+                    ? FontWeight.w400
+                    : FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: tags.isEmpty
+                ? const Text('登録済みの候補がありません。')
+                : Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: tags
+                        .map((BuildingTag tag) {
+                          return FilterChip(
+                            key: Key('$chipKeyPrefix-${tag.tagId}'),
+                            selected: existingBuildingSelection
+                                ? controller.isExistingBuildingTagSelected(
+                                    type,
+                                    tag.tagId,
+                                  )
+                                : controller.isTagSelected(type, tag.tagId),
+                            onSelected: (bool selected) =>
+                                onToggleTag(tag.tagId),
+                            label: Text(tag.tagName),
+                          );
+                        })
+                        .toList(growable: false),
+                  ),
           ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              key: Key('add-tag-${type.apiValue}'),
+              onPressed: controller.isCreatingTag(type) ? null : onAddTag,
+              icon: controller.isCreatingTag(type)
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_outlined),
+              label: const Text('新しいタグを追加'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddTagForm extends StatefulWidget {
+  const _AddTagForm({
+    required this.type,
+    required this.controller,
+    required this.showHeading,
+  });
+
+  final BuildingTagType type;
+  final RecordDraftController controller;
+  final bool showHeading;
+
+  @override
+  State<_AddTagForm> createState() => _AddTagFormState();
+}
+
+class _AddTagFormState extends State<_AddTagForm> {
+  final TextEditingController _nameController = TextEditingController();
+  String? _errorMessage;
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_isSubmitting) {
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    final String? error = await widget.controller.createAndSelectTag(
+      widget.type,
+      _nameController.text,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (error != null) {
+      setState(() {
+        _isSubmitting = false;
+        _errorMessage = error;
+      });
+      return;
+    }
+
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (widget.showHeading) ...<Widget>[
+          Text(
+            '${widget.type.displayName}タグを追加',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 16),
+        ],
+        TextField(
+          key: Key('new-tag-name-${widget.type.apiValue}'),
+          controller: _nameController,
+          autofocus: true,
+          maxLength: 80,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _submit(),
+          decoration: InputDecoration(
+            labelText: 'タグ名',
+            hintText: '例：設計研修 第一室',
+            border: const OutlineInputBorder(),
+            errorText: _errorMessage,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '追加したタグはタグマスターへ保存され、今回の記録で自動選択されます。タグはIDで管理し、名称変更は既存記録の表示にも反映する方針です。',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: <Widget>[
+            TextButton(
+              onPressed: _isSubmitting
+                  ? null
+                  : () => Navigator.of(context).pop(),
+              child: const Text('キャンセル'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              key: Key('submit-create-tag-${widget.type.apiValue}'),
+              onPressed: _isSubmitting ? null : _submit,
+              icon: _isSubmitting
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_outlined),
+              label: const Text('追加して選択'),
+            ),
+          ],
+        ),
       ],
     );
   }
 }
 
 class _ExistingBuildingDraftForm extends StatelessWidget {
-  const _ExistingBuildingDraftForm({required this.controller});
+  const _ExistingBuildingDraftForm({
+    required this.controller,
+    required this.onAddTag,
+  });
 
   final RecordDraftController controller;
+  final ValueChanged<BuildingTagType> onAddTag;
 
   @override
   Widget build(BuildContext context) {
@@ -559,7 +839,11 @@ class _ExistingBuildingDraftForm extends StatelessWidget {
           ),
         if (selectedBuilding != null) ...<Widget>[
           const SizedBox(height: 16),
-          _SelectedExistingBuildingCard(building: selectedBuilding),
+          _SelectedExistingBuildingCard(
+            building: selectedBuilding,
+            controller: controller,
+            onAddTag: onAddTag,
+          ),
         ],
       ],
     );
@@ -595,9 +879,15 @@ class _EmptyBuildingPanel extends StatelessWidget {
 }
 
 class _SelectedExistingBuildingCard extends StatelessWidget {
-  const _SelectedExistingBuildingCard({required this.building});
+  const _SelectedExistingBuildingCard({
+    required this.building,
+    required this.controller,
+    required this.onAddTag,
+  });
 
   final Building building;
+  final RecordDraftController controller;
+  final ValueChanged<BuildingTagType> onAddTag;
 
   @override
   Widget build(BuildContext context) {
@@ -633,7 +923,7 @@ class _SelectedExistingBuildingCard extends StatelessWidget {
             children: <Widget>[
               Icon(Icons.lock_outline, size: 18),
               SizedBox(width: 6),
-              Expanded(child: Text('既存建物のタグはこの画面では変更できません。')),
+              Expanded(child: Text('登録済みタグの削除・変更はできません。追加するタグは下で選べます。')),
             ],
           ),
           const SizedBox(height: 12),
@@ -642,6 +932,66 @@ class _SelectedExistingBuildingCard extends StatelessWidget {
           _ReadOnlyTagGroup(label: '営業タグ', values: building.salesTags),
           const SizedBox(height: 10),
           _ReadOnlyTagGroup(label: '施工タグ', values: building.constructionTags),
+          const SizedBox(height: 18),
+          Text(
+            'この建物へタグを追加',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          const Text('今回の保存時に、この建物へ追加するタグを選びます。'),
+          const SizedBox(height: 12),
+          _TagSelectorAccordion(
+            type: BuildingTagType.design,
+            tags: controller.tagsFor(BuildingTagType.design),
+            controller: controller,
+            chipKeyPrefix: 'existing-building-tag-design',
+            onToggleTag: (String tagId) {
+              controller.toggleExistingBuildingTag(
+                BuildingTagType.design,
+                tagId,
+              );
+            },
+            onAddTag: () => onAddTag(BuildingTagType.design),
+            existingBuildingSelection: true,
+            title: '追加する設計タグ',
+            scopeLabel: '既存建物へ追加予定',
+          ),
+          const SizedBox(height: 12),
+          _TagSelectorAccordion(
+            type: BuildingTagType.sales,
+            tags: controller.tagsFor(BuildingTagType.sales),
+            controller: controller,
+            chipKeyPrefix: 'existing-building-tag-sales',
+            onToggleTag: (String tagId) {
+              controller.toggleExistingBuildingTag(
+                BuildingTagType.sales,
+                tagId,
+              );
+            },
+            onAddTag: () => onAddTag(BuildingTagType.sales),
+            existingBuildingSelection: true,
+            title: '追加する営業タグ',
+            scopeLabel: '既存建物へ追加予定',
+          ),
+          const SizedBox(height: 12),
+          _TagSelectorAccordion(
+            type: BuildingTagType.construction,
+            tags: controller.tagsFor(BuildingTagType.construction),
+            controller: controller,
+            chipKeyPrefix: 'existing-building-tag-construction',
+            onToggleTag: (String tagId) {
+              controller.toggleExistingBuildingTag(
+                BuildingTagType.construction,
+                tagId,
+              );
+            },
+            onAddTag: () => onAddTag(BuildingTagType.construction),
+            existingBuildingSelection: true,
+            title: '追加する施工タグ',
+            scopeLabel: '既存建物へ追加予定',
+          ),
         ],
       ),
     );
@@ -677,9 +1027,10 @@ class _ReadOnlyTagGroup extends StatelessWidget {
 }
 
 class _VisitDraftSection extends StatelessWidget {
-  const _VisitDraftSection({required this.controller});
+  const _VisitDraftSection({required this.controller, required this.onAddTag});
 
   final RecordDraftController controller;
+  final ValueChanged<BuildingTagType> onAddTag;
 
   @override
   Widget build(BuildContext context) {
@@ -714,37 +1065,14 @@ class _VisitDraftSection extends StatelessWidget {
             const SizedBox(height: 8),
             const Text('訪問のきっかけ、感想、撮影した場所を下書きへ追加します。'),
             const SizedBox(height: 20),
-            Text(
-              'きっかけタグ',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            _TagSelectorAccordion(
+              type: BuildingTagType.trigger,
+              tags: triggerTags,
+              controller: controller,
+              chipKeyPrefix: 'visit-trigger-tag',
+              onToggleTag: controller.toggleTriggerTag,
+              onAddTag: () => onAddTag(BuildingTagType.trigger),
             ),
-            const SizedBox(height: 4),
-            const Text('訪問ごとに保存します。複数選択できます。'),
-            const SizedBox(height: 8),
-            if (triggerTags.isEmpty)
-              const Text('登録済みの候補がありません。')
-            else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: triggerTags
-                    .map((BuildingTag tag) {
-                      return FilterChip(
-                        key: Key('visit-trigger-tag-${tag.tagId}'),
-                        selected: controller.isTagSelected(
-                          BuildingTagType.trigger,
-                          tag.tagId,
-                        ),
-                        onSelected: (bool selected) {
-                          controller.toggleTriggerTag(tag.tagId);
-                        },
-                        label: Text(tag.tagName),
-                      );
-                    })
-                    .toList(growable: false),
-              ),
             const SizedBox(height: 20),
             TextFormField(
               key: const Key('visit-impression-field'),
