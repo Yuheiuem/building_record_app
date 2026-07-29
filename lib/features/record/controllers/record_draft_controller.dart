@@ -7,10 +7,12 @@ import '../../../core/config/app_config.dart';
 import '../../../data/models/bootstrap_data.dart';
 import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
+import '../../../data/models/record_draft_location.dart';
 import '../../../data/models/record_draft_photo.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
+import '../../../data/services/record_location_service.dart';
 
 enum RecordBuildingMode { newBuilding, existingBuilding }
 
@@ -19,13 +21,16 @@ class RecordDraftController extends ChangeNotifier {
     required RecordImagePickerService imagePickerService,
     required BootstrapApiService bootstrapApiService,
     required AuthService authService,
+    required RecordLocationService locationService,
   }) : _imagePickerService = imagePickerService,
        _bootstrapApiService = bootstrapApiService,
-       _authService = authService;
+       _authService = authService,
+       _locationService = locationService;
 
   final RecordImagePickerService _imagePickerService;
   final BootstrapApiService _bootstrapApiService;
   final AuthService _authService;
+  final RecordLocationService _locationService;
 
   final List<RecordDraftPhoto> _photos = <RecordDraftPhoto>[];
   final List<Building> _buildings = <Building>[];
@@ -33,6 +38,7 @@ class RecordDraftController extends ChangeNotifier {
   final Set<String> _selectedDesignTagIds = <String>{};
   final Set<String> _selectedSalesTagIds = <String>{};
   final Set<String> _selectedConstructionTagIds = <String>{};
+  final Set<String> _selectedTriggerTagIds = <String>{};
 
   bool _isPicking = false;
   String? _errorMessage;
@@ -46,6 +52,12 @@ class RecordDraftController extends ChangeNotifier {
   String _newBuildingName = '';
   String _buildingSearchQuery = '';
   Building? _selectedExistingBuilding;
+
+  String _impression = '';
+  RecordDraftLocation? _visitLocation;
+  bool _isGettingLocation = false;
+  String? _locationErrorMessage;
+  String? _locationNoticeMessage;
 
   UnmodifiableListView<RecordDraftPhoto> get photos =>
       UnmodifiableListView<RecordDraftPhoto>(_photos);
@@ -71,6 +83,19 @@ class RecordDraftController extends ChangeNotifier {
   String get newBuildingName => _newBuildingName;
   String get buildingSearchQuery => _buildingSearchQuery;
   Building? get selectedExistingBuilding => _selectedExistingBuilding;
+
+  String get impression => _impression;
+  RecordDraftLocation? get visitLocation => _visitLocation;
+  bool get isGettingLocation => _isGettingLocation;
+  String? get locationErrorMessage => _locationErrorMessage;
+  String? get locationNoticeMessage => _locationNoticeMessage;
+  bool get hasVisitLocation => _visitLocation != null;
+  bool get canUseSelectedBuildingLocation {
+    final Building? building = _selectedExistingBuilding;
+    return _buildingMode == RecordBuildingMode.existingBuilding &&
+        building?.latitude != null &&
+        building?.longitude != null;
+  }
 
   List<Building> get filteredBuildings {
     final String query = _normalizeSearchText(_buildingSearchQuery);
@@ -170,6 +195,7 @@ class RecordDraftController extends ChangeNotifier {
       _removeUnavailableTagIds(_selectedDesignTagIds);
       _removeUnavailableTagIds(_selectedSalesTagIds);
       _removeUnavailableTagIds(_selectedConstructionTagIds);
+      _removeUnavailableTagIds(_selectedTriggerTagIds);
       _hasLoadedBootstrap = true;
     } on BootstrapApiException catch (error) {
       _bootstrapErrorMessage = error.message;
@@ -269,6 +295,12 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _buildingMode = mode;
+    if (mode == RecordBuildingMode.newBuilding &&
+        _visitLocation?.source == RecordLocationSource.buildingFallback) {
+      _visitLocation = null;
+      _locationErrorMessage = null;
+      _locationNoticeMessage = '建物の代表位置を解除しました。';
+    }
     notifyListeners();
   }
 
@@ -306,6 +338,9 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _selectedExistingBuilding = building;
+    if (_visitLocation?.source == RecordLocationSource.buildingFallback) {
+      _setSelectedBuildingFallbackLocation(notify: false);
+    }
     notifyListeners();
   }
 
@@ -315,7 +350,98 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _selectedExistingBuilding = null;
+    if (_visitLocation?.source == RecordLocationSource.buildingFallback) {
+      _visitLocation = null;
+      _locationNoticeMessage = '建物の代表位置を解除しました。';
+    }
     notifyListeners();
+  }
+
+  void toggleTriggerTag(String tagId) {
+    final bool isAvailable = _tags.any((BuildingTag tag) {
+      return tag.tagId == tagId && tag.tagType == BuildingTagType.trigger;
+    });
+    if (!isAvailable) {
+      return;
+    }
+
+    if (_selectedTriggerTagIds.contains(tagId)) {
+      _selectedTriggerTagIds.remove(tagId);
+    } else {
+      _selectedTriggerTagIds.add(tagId);
+    }
+    notifyListeners();
+  }
+
+  void setImpression(String value) {
+    _impression = value;
+  }
+
+  Future<void> acquireCurrentLocation() async {
+    if (_isGettingLocation) {
+      return;
+    }
+
+    _isGettingLocation = true;
+    _locationErrorMessage = null;
+    _locationNoticeMessage = null;
+    notifyListeners();
+
+    try {
+      _visitLocation = await _locationService.getCurrentLocation();
+      _locationNoticeMessage = '現在地を取得しました。';
+    } on RecordLocationException catch (error) {
+      _locationErrorMessage = error.message;
+    } catch (_) {
+      _locationErrorMessage = '現在地を取得できませんでした。もう一度お試しください。';
+    } finally {
+      _isGettingLocation = false;
+      notifyListeners();
+    }
+  }
+
+  void useSelectedBuildingLocation() {
+    _setSelectedBuildingFallbackLocation(notify: true);
+  }
+
+  void clearVisitLocation() {
+    if (_visitLocation == null) {
+      return;
+    }
+
+    _visitLocation = null;
+    _locationErrorMessage = null;
+    _locationNoticeMessage = '位置情報をクリアしました。';
+    notifyListeners();
+  }
+
+  void _setSelectedBuildingFallbackLocation({required bool notify}) {
+    final Building? building = _selectedExistingBuilding;
+    final double? latitude = building?.latitude;
+    final double? longitude = building?.longitude;
+
+    if (latitude == null || longitude == null) {
+      _visitLocation = null;
+      _locationErrorMessage = '選択した建物には代表位置が登録されていません。';
+      _locationNoticeMessage = null;
+      if (notify) {
+        notifyListeners();
+      }
+      return;
+    }
+
+    _visitLocation = RecordDraftLocation(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyM: null,
+      source: RecordLocationSource.buildingFallback,
+      capturedAt: DateTime.now(),
+    );
+    _locationErrorMessage = null;
+    _locationNoticeMessage = '建物の代表位置を使用します。';
+    if (notify) {
+      notifyListeners();
+    }
   }
 
   Set<String> _tagIdsFor(BuildingTagType type) {
@@ -323,7 +449,7 @@ class RecordDraftController extends ChangeNotifier {
       BuildingTagType.design => _selectedDesignTagIds,
       BuildingTagType.sales => _selectedSalesTagIds,
       BuildingTagType.construction => _selectedConstructionTagIds,
-      BuildingTagType.trigger => <String>{},
+      BuildingTagType.trigger => _selectedTriggerTagIds,
     };
   }
 

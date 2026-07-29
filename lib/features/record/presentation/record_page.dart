@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
+import '../../../data/models/record_draft_location.dart';
 import '../../../data/models/record_draft_photo.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
+import '../../../data/services/record_location_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../controllers/record_draft_controller.dart';
 
@@ -16,12 +18,14 @@ class RecordPage extends StatefulWidget {
     required this.authService,
     this.imagePickerService,
     this.bootstrapApiService,
+    this.locationService,
     super.key,
   });
 
   final AuthService authService;
   final RecordImagePickerService? imagePickerService;
   final BootstrapApiService? bootstrapApiService;
+  final RecordLocationService? locationService;
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -30,6 +34,7 @@ class RecordPage extends StatefulWidget {
 class _RecordPageState extends State<RecordPage> {
   late final BootstrapApiService _bootstrapApiService;
   late final bool _ownsBootstrapApiService;
+  late final RecordLocationService _locationService;
   late final RecordDraftController _controller;
 
   @override
@@ -38,11 +43,14 @@ class _RecordPageState extends State<RecordPage> {
     _ownsBootstrapApiService = widget.bootstrapApiService == null;
     _bootstrapApiService =
         widget.bootstrapApiService ?? HttpBootstrapApiService();
+    _locationService =
+        widget.locationService ?? GeolocatorRecordLocationService();
     _controller = RecordDraftController(
       imagePickerService:
           widget.imagePickerService ?? ImagePickerRecordImageService(),
       bootstrapApiService: _bootstrapApiService,
       authService: widget.authService,
+      locationService: _locationService,
     );
     unawaited(_controller.loadBootstrapData());
   }
@@ -133,6 +141,8 @@ class _RecordPageState extends State<RecordPage> {
                         const _EmptyDraftPanel(),
                       const SizedBox(height: 24),
                       _BuildingDraftSection(controller: _controller),
+                      const SizedBox(height: 24),
+                      _VisitDraftSection(controller: _controller),
                       const SizedBox(height: 24),
                       const AppVersionFooter(),
                     ],
@@ -427,8 +437,6 @@ class _NewBuildingDraftForm extends StatelessWidget {
           tags: controller.tagsFor(BuildingTagType.construction),
           controller: controller,
         ),
-        const SizedBox(height: 16),
-        const _NextStageNotice(),
       ],
     );
   }
@@ -553,8 +561,6 @@ class _ExistingBuildingDraftForm extends StatelessWidget {
           const SizedBox(height: 16),
           _SelectedExistingBuildingCard(building: selectedBuilding),
         ],
-        const SizedBox(height: 16),
-        const _NextStageNotice(),
       ],
     );
   }
@@ -670,8 +676,213 @@ class _ReadOnlyTagGroup extends StatelessWidget {
   }
 }
 
-class _NextStageNotice extends StatelessWidget {
-  const _NextStageNotice();
+class _VisitDraftSection extends StatelessWidget {
+  const _VisitDraftSection({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<BuildingTag> triggerTags = controller.tagsFor(
+      BuildingTagType.trigger,
+    );
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.edit_note_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                  size: 32,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '今回の訪問',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('訪問のきっかけ、感想、撮影した場所を下書きへ追加します。'),
+            const SizedBox(height: 20),
+            Text(
+              'きっかけタグ',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            const Text('訪問ごとに保存します。複数選択できます。'),
+            const SizedBox(height: 8),
+            if (triggerTags.isEmpty)
+              const Text('登録済みの候補がありません。')
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: triggerTags
+                    .map((BuildingTag tag) {
+                      return FilterChip(
+                        key: Key('visit-trigger-tag-${tag.tagId}'),
+                        selected: controller.isTagSelected(
+                          BuildingTagType.trigger,
+                          tag.tagId,
+                        ),
+                        onSelected: (bool selected) {
+                          controller.toggleTriggerTag(tag.tagId);
+                        },
+                        label: Text(tag.tagName),
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+            const SizedBox(height: 20),
+            TextFormField(
+              key: const Key('visit-impression-field'),
+              initialValue: controller.impression,
+              onChanged: controller.setImpression,
+              minLines: 4,
+              maxLines: 8,
+              maxLength: 2000,
+              textInputAction: TextInputAction.newline,
+              decoration: const InputDecoration(
+                labelText: '感想',
+                hintText: '空間の印象、気づいた点、あとで調べたいことなど',
+                alignLabelWithHint: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _VisitLocationPanel(controller: controller),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Icon(Icons.info_outline, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'この段階では訪問情報も端末内の下書きです。地図での手動位置指定とサーバー保存は後続段階で追加します。',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VisitLocationPanel extends StatelessWidget {
+  const _VisitLocationPanel({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final RecordDraftLocation? location = controller.visitLocation;
+    final ColorScheme colors = Theme.of(context).colorScheme;
+
+    return Container(
+      key: const Key('visit-location-panel'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(Icons.my_location_outlined, color: colors.primary),
+              const SizedBox(width: 8),
+              Text(
+                '位置情報',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (controller.isGettingLocation) ...<Widget>[
+            const LinearProgressIndicator(),
+            const SizedBox(height: 10),
+            const Text('現在地を取得しています。'),
+          ] else if (location == null)
+            const _LocationEmptyState()
+          else
+            _LocationValue(location: location),
+          if (controller.locationErrorMessage != null) ...<Widget>[
+            const SizedBox(height: 12),
+            _InlineLocationMessage(
+              message: controller.locationErrorMessage!,
+              isError: true,
+            ),
+          ],
+          if (controller.locationNoticeMessage != null) ...<Widget>[
+            const SizedBox(height: 12),
+            _InlineLocationMessage(message: controller.locationNoticeMessage!),
+          ],
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: <Widget>[
+              FilledButton.icon(
+                key: const Key('capture-current-location'),
+                onPressed: controller.isGettingLocation
+                    ? null
+                    : controller.acquireCurrentLocation,
+                icon: const Icon(Icons.gps_fixed_outlined),
+                label: Text(location == null ? '現在地を取得' : '現在地を再取得'),
+              ),
+              if (controller.canUseSelectedBuildingLocation)
+                OutlinedButton.icon(
+                  key: const Key('use-building-location'),
+                  onPressed: controller.isGettingLocation
+                      ? null
+                      : controller.useSelectedBuildingLocation,
+                  icon: const Icon(Icons.apartment_outlined),
+                  label: const Text('建物の代表位置を使う'),
+                ),
+              if (location != null)
+                TextButton.icon(
+                  key: const Key('clear-visit-location'),
+                  onPressed: controller.isGettingLocation
+                      ? null
+                      : controller.clearVisitLocation,
+                  icon: const Icon(Icons.clear_outlined),
+                  label: const Text('位置をクリア'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocationEmptyState extends StatelessWidget {
+  const _LocationEmptyState();
 
   @override
   Widget build(BuildContext context) {
@@ -679,14 +890,118 @@ class _NextStageNotice extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: const Row(
+        children: <Widget>[
+          Icon(Icons.location_off_outlined),
+          SizedBox(width: 8),
+          Expanded(child: Text('位置はまだ取得されていません。')),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocationValue extends StatelessWidget {
+  const _LocationValue({required this.location});
+
+  final RecordDraftLocation location;
+
+  @override
+  Widget build(BuildContext context) {
+    final String accuracyText = location.accuracyM == null
+        ? '未設定'
+        : '±${location.accuracyM!.toStringAsFixed(1)} m';
+
+    return Container(
+      key: const Key('visit-location-value'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(Icons.info_outline, size: 20),
-          SizedBox(width: 8),
-          Expanded(child: Text('きっかけタグ・感想・位置情報は次の段階で追加します。')),
+          _LocationRow(label: '取得方法', value: location.source.displayName),
+          const SizedBox(height: 6),
+          _LocationRow(
+            label: '緯度',
+            value: location.latitude.toStringAsFixed(6),
+          ),
+          const SizedBox(height: 6),
+          _LocationRow(
+            label: '経度',
+            value: location.longitude.toStringAsFixed(6),
+          ),
+          const SizedBox(height: 6),
+          _LocationRow(label: '精度', value: accuracyText),
+        ],
+      ),
+    );
+  }
+}
+
+class _LocationRow extends StatelessWidget {
+  const _LocationRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 76,
+          child: Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        Expanded(child: Text(value)),
+      ],
+    );
+  }
+}
+
+class _InlineLocationMessage extends StatelessWidget {
+  const _InlineLocationMessage({required this.message, this.isError = false});
+
+  final String message;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    final Color background = isError
+        ? colors.errorContainer
+        : colors.secondaryContainer;
+    final Color foreground = isError
+        ? colors.onErrorContainer
+        : colors.onSecondaryContainer;
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            isError ? Icons.error_outline : Icons.check_circle_outline,
+            color: foreground,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, style: TextStyle(color: foreground)),
+          ),
         ],
       ),
     );

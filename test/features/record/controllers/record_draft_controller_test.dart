@@ -3,10 +3,12 @@ import 'dart:typed_data';
 import 'package:building_record_app/data/models/bootstrap_data.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
+import 'package:building_record_app/data/models/record_draft_location.dart';
 import 'package:building_record_app/data/models/record_draft_photo.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/record_image_picker_service.dart';
+import 'package:building_record_app/data/services/record_location_service.dart';
 import 'package:building_record_app/features/record/controllers/record_draft_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -112,11 +114,69 @@ void main() {
       '鹿島施工',
     ]);
   });
+
+  test('きっかけタグと感想を建物モード切替後も保持する', () async {
+    final RecordDraftController controller = _createController(
+      bootstrapData: _bootstrapData(),
+    );
+
+    await controller.loadBootstrapData();
+    controller.toggleTriggerTag('tag-trigger-1');
+    controller.setImpression('外観の素材の切り替えが印象的だった。');
+    controller.setBuildingMode(RecordBuildingMode.existingBuilding);
+    controller.setBuildingMode(RecordBuildingMode.newBuilding);
+
+    expect(
+      controller.isTagSelected(BuildingTagType.trigger, 'tag-trigger-1'),
+      isTrue,
+    );
+    expect(controller.impression, '外観の素材の切り替えが印象的だった。');
+  });
+
+  test('現在地を取得して下書きに保持し、クリアできる', () async {
+    final RecordDraftLocation location = _gpsLocation();
+    final RecordDraftController controller = _createController(
+      locationService: _FakeRecordLocationService(location),
+    );
+
+    await controller.acquireCurrentLocation();
+
+    expect(controller.visitLocation, same(location));
+    expect(controller.locationNoticeMessage, '現在地を取得しました。');
+    expect(controller.locationErrorMessage, isNull);
+
+    controller.clearVisitLocation();
+    expect(controller.visitLocation, isNull);
+    expect(controller.locationNoticeMessage, '位置情報をクリアしました。');
+  });
+
+  test('既存建物の代表位置を訪問位置として利用できる', () async {
+    final RecordDraftController controller = _createController(
+      bootstrapData: _bootstrapData(),
+    );
+
+    await controller.loadBootstrapData();
+    controller.setBuildingMode(RecordBuildingMode.existingBuilding);
+    controller.selectExistingBuilding('building-1');
+
+    expect(controller.canUseSelectedBuildingLocation, isTrue);
+
+    controller.useSelectedBuildingLocation();
+
+    expect(
+      controller.visitLocation?.source,
+      RecordLocationSource.buildingFallback,
+    );
+    expect(controller.visitLocation?.latitude, 35.681236);
+    expect(controller.visitLocation?.longitude, 139.767125);
+    expect(controller.visitLocation?.accuracyM, isNull);
+  });
 }
 
 RecordDraftController _createController({
   List<RecordDraftPhoto> photos = const <RecordDraftPhoto>[],
   BootstrapData? bootstrapData,
+  RecordLocationService? locationService,
 }) {
   return RecordDraftController(
     imagePickerService: _FakeRecordImagePickerService(photos),
@@ -124,6 +184,8 @@ RecordDraftController _createController({
       bootstrapData ?? _emptyBootstrapData(),
     ),
     authService: _FakeAuthService(),
+    locationService:
+        locationService ?? _FakeRecordLocationService(_gpsLocation()),
   );
 }
 
@@ -137,6 +199,16 @@ RecordDraftPhoto _photo({
     fileName: fileName,
     mimeType: fileName.endsWith('.png') ? 'image/png' : 'image/jpeg',
     bytes: Uint8List(byteSize),
+  );
+}
+
+RecordDraftLocation _gpsLocation() {
+  return RecordDraftLocation(
+    latitude: 35.681236,
+    longitude: 139.767125,
+    accuracyM: 8.4,
+    source: RecordLocationSource.gps,
+    capturedAt: DateTime.parse('2026-07-29T10:00:00+09:00'),
   );
 }
 
@@ -163,6 +235,8 @@ BootstrapData _bootstrapData() {
         id: 'building-1',
         name: '第一ビル',
         address: '東京都千代田区',
+        latitude: 35.681236,
+        longitude: 139.767125,
         designTags: const <String>['設計第一室'],
         salesTags: const <String>['営業第一部'],
         constructionTags: const <String>['当社施工'],
@@ -175,6 +249,18 @@ BootstrapData _bootstrapData() {
       ),
     ],
     tags: <BuildingTag>[
+      _tag(
+        id: 'tag-trigger-1',
+        type: BuildingTagType.trigger,
+        name: '営業の仕事',
+        order: 1,
+      ),
+      _tag(
+        id: 'tag-trigger-2',
+        type: BuildingTagType.trigger,
+        name: '個人旅行',
+        order: 2,
+      ),
       _tag(
         id: 'tag-design-1',
         type: BuildingTagType.design,
@@ -200,7 +286,7 @@ BootstrapData _bootstrapData() {
         order: 2,
       ),
     ],
-    counts: const BootstrapCounts(buildings: 2, visits: 0, photos: 0, tags: 4),
+    counts: const BootstrapCounts(buildings: 2, visits: 0, photos: 0, tags: 6),
   );
 }
 
@@ -208,6 +294,8 @@ Building _building({
   required String id,
   required String name,
   String? address,
+  double? latitude,
+  double? longitude,
   List<String> designTags = const <String>[],
   List<String> salesTags = const <String>[],
   List<String> constructionTags = const <String>[],
@@ -216,8 +304,8 @@ Building _building({
     buildingId: id,
     buildingName: name,
     searchName: name,
-    latitude: null,
-    longitude: null,
+    latitude: latitude,
+    longitude: longitude,
     address: address,
     designTags: designTags,
     salesTags: salesTags,
@@ -273,6 +361,15 @@ class _FakeBootstrapApiService implements BootstrapApiService {
 
   @override
   void close() {}
+}
+
+class _FakeRecordLocationService implements RecordLocationService {
+  const _FakeRecordLocationService(this.location);
+
+  final RecordDraftLocation location;
+
+  @override
+  Future<RecordDraftLocation> getCurrentLocation() async => location;
 }
 
 class _FakeAuthService extends AuthService {
