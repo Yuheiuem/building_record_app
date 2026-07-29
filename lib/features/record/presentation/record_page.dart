@@ -6,6 +6,7 @@ import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
 import '../../../data/models/record_draft_location.dart';
 import '../../../data/models/record_draft_photo.dart';
+import '../../../data/models/record_submission_result.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
@@ -333,9 +334,23 @@ class _RecordSaveSection extends StatelessWidget {
                 return _PhotoUploadProgressRow(
                   photo: photo,
                   status: controller.photoUploadStatus(photo.photoId),
+                  performance: controller
+                      .photoUploadResult(photo.photoId)
+                      ?.performance,
                 );
               }),
             ],
+            if (controller.lastSubmissionDuration != null) ...<Widget>[
+              const SizedBox(height: 12),
+              Text(
+                '今回の保存処理：${_formatElapsed(controller.lastSubmissionDuration!)}',
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+            _UploadPerformanceDetails(controller: controller),
             if (controller.submissionErrorMessage != null) ...<Widget>[
               const SizedBox(height: 16),
               Container(
@@ -490,10 +505,15 @@ class _SubmissionStatusPanel extends StatelessWidget {
 }
 
 class _PhotoUploadProgressRow extends StatelessWidget {
-  const _PhotoUploadProgressRow({required this.photo, required this.status});
+  const _PhotoUploadProgressRow({
+    required this.photo,
+    required this.status,
+    required this.performance,
+  });
 
   final RecordDraftPhoto photo;
   final RecordPhotoUploadStatus status;
+  final RecordUploadPerformance? performance;
 
   @override
   Widget build(BuildContext context) {
@@ -530,11 +550,119 @@ class _PhotoUploadProgressRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(details.label),
+          Text(
+            status == RecordPhotoUploadStatus.uploaded && performance != null
+                ? '${details.label} ${_formatElapsed(performance!.clientTotalDuration)}'
+                : details.label,
+          ),
         ],
       ),
     );
   }
+}
+
+class _UploadPerformanceDetails extends StatelessWidget {
+  const _UploadPerformanceDetails({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<({RecordDraftPhoto photo, RecordUploadPerformance performance})>
+    entries =
+        <({RecordDraftPhoto photo, RecordUploadPerformance performance})>[];
+
+    for (final RecordDraftPhoto photo in controller.photos) {
+      final RecordUploadPerformance? performance = controller
+          .photoUploadResult(photo.photoId)
+          ?.performance;
+      if (performance != null) {
+        entries.add((photo: photo, performance: performance));
+      }
+    }
+
+    if (entries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: ExpansionTile(
+          key: const Key('record-upload-performance'),
+          title: const Text('送信時間の内訳'),
+          subtitle: const Text('通信・認証・Drive保存などを確認できます。'),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: entries.map((entry) {
+            final RecordUploadPerformance performance = entry.performance;
+            final List<String> serverDetails = <String>[
+              if (performance.authenticationMode != null)
+                '認証 ${_authenticationModeLabel(performance.authenticationMode!)}',
+              if (performance.authenticationMs != null)
+                '認証処理 ${_formatMilliseconds(performance.authenticationMs!)}',
+              if (performance.lookupMs != null)
+                '検索 ${_formatMilliseconds(performance.lookupMs!)}',
+              if (performance.driveSaveMs != null)
+                'Drive ${_formatMilliseconds(performance.driveSaveMs!)}',
+              if (performance.sheetWriteMs != null)
+                'Sheets ${_formatMilliseconds(performance.sheetWriteMs!)}',
+              if (performance.handlerTotalMs != null)
+                'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
+            ];
+
+            return Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    entry.photo.fileName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'ブラウザ変換 ${_formatMilliseconds(performance.clientEncodeMs)} / '
+                    '通信全体 ${_formatMilliseconds(performance.clientRequestMs)}',
+                  ),
+                  if (serverDetails.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(serverDetails.join(' / ')),
+                  ],
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+String _formatElapsed(Duration duration) {
+  return _formatMilliseconds(duration.inMilliseconds);
+}
+
+String _formatMilliseconds(int milliseconds) {
+  if (milliseconds < 1000) {
+    return '$milliseconds ms';
+  }
+  return '${(milliseconds / 1000).toStringAsFixed(1)}秒';
+}
+
+String _authenticationModeLabel(String mode) {
+  return switch (mode) {
+    'cache' => 'キャッシュ',
+    'tokeninfo' => 'tokeninfo',
+    _ => mode,
+  };
 }
 
 class _DraftHeader extends StatelessWidget {

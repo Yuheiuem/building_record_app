@@ -35,26 +35,7 @@ function handleBeginRecord(requestId, payload, authContext) {
       return createApiResponse(true, requestId, cached, null, null);
     }
 
-    validateTagIds_(
-      spreadsheet,
-      normalized.designTagIds,
-      'design'
-    );
-    validateTagIds_(
-      spreadsheet,
-      normalized.salesTagIds,
-      'sales'
-    );
-    validateTagIds_(
-      spreadsheet,
-      normalized.constructionTagIds,
-      'construction'
-    );
-    validateTagIds_(
-      spreadsheet,
-      normalized.triggerTagIds,
-      'trigger'
-    );
+    validateRecordTagIds_(spreadsheet, normalized);
 
     var buildingResult = ensureRecordBuilding_(spreadsheet, normalized);
     var visitResult = ensureRecordVisit_(spreadsheet, normalized);
@@ -76,7 +57,8 @@ function handleBeginRecord(requestId, payload, authContext) {
       {
         buildingId: normalized.buildingId,
         visitId: normalized.visitId
-      }
+      },
+      true
     );
 
     return createApiResponse(true, requestId, result, null, null);
@@ -95,19 +77,64 @@ function handleBeginRecord(requestId, payload, authContext) {
  */
 function handleUploadPhoto(requestId, payload, authContext) {
   requireAuthenticatedContext_(authContext);
+  var handlerStartedAt = Date.now();
+  var timings = {
+    authenticationMs: Number(authContext.verificationMs) || 0,
+    lockWaitMs: 0,
+    lookupMs: 0,
+    base64DecodeMs: 0,
+    driveSaveMs: 0,
+    sheetWriteMs: 0
+  };
   var normalized = normalizeUploadPhotoPayload_(requestId, payload);
+
+  var decodeStartedAt = Date.now();
+  var bytes;
+  try {
+    bytes = Utilities.base64Decode(normalized.base64Data);
+  } catch (error) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      '画像データが正しいBase64ではありません。'
+    );
+  }
+  timings.base64DecodeMs = Date.now() - decodeStartedAt;
+
+  if (bytes.length !== normalized.byteSize) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      '画像データのサイズが申告値と一致しません。'
+    );
+  }
+  if (bytes.length > RECORD_MAX_PHOTO_BYTES) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      '画像サイズが5MBを超えています。'
+    );
+  }
+
   var spreadsheet = getDataSpreadsheet_();
   var lock = LockService.getScriptLock();
+  var lockStartedAt = Date.now();
   lock.waitLock(30000);
+  timings.lockWaitMs = Date.now() - lockStartedAt;
 
   try {
+    var lookupStartedAt = Date.now();
     var cached = getRequestResult_(
       spreadsheet,
       normalized.requestId,
       'uploadPhoto'
     );
     if (cached !== null) {
+      timings.lookupMs = Date.now() - lookupStartedAt;
       cached.reused = true;
+      attachUploadPerformance_(
+        cached,
+        authContext,
+        timings,
+        handlerStartedAt
+      );
       return createApiResponse(true, requestId, cached, null, null);
     }
 
@@ -137,12 +164,22 @@ function handleUploadPhoto(requestId, payload, authContext) {
       'photoId',
       normalized.photoId
     );
+    timings.lookupMs = Date.now() - lookupStartedAt;
+
     if (existingPhoto !== null) {
       validateExistingPhotoRecord_(existingPhoto, normalized);
       var existingResult = photoResultFromSheetRecord_(
         existingPhoto,
         true
       );
+      attachUploadPerformance_(
+        existingResult,
+        authContext,
+        timings,
+        handlerStartedAt
+      );
+
+      var existingWriteStartedAt = Date.now();
       appendRequestResult_(
         spreadsheet,
         normalized.requestId,
@@ -152,7 +189,15 @@ function handleUploadPhoto(requestId, payload, authContext) {
           buildingId: normalized.buildingId,
           visitId: normalized.visitId,
           photoId: normalized.photoId
-        }
+        },
+        true
+      );
+      timings.sheetWriteMs = Date.now() - existingWriteStartedAt;
+      attachUploadPerformance_(
+        existingResult,
+        authContext,
+        timings,
+        handlerStartedAt
       );
       return createApiResponse(
         true,
@@ -163,29 +208,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
       );
     }
 
-    var bytes;
-    try {
-      bytes = Utilities.base64Decode(normalized.base64Data);
-    } catch (error) {
-      throw createApiError_(
-        'VALIDATION_ERROR',
-        '画像データが正しいBase64ではありません。'
-      );
-    }
-
-    if (bytes.length !== normalized.byteSize) {
-      throw createApiError_(
-        'VALIDATION_ERROR',
-        '画像データのサイズが申告値と一致しません。'
-      );
-    }
-    if (bytes.length > RECORD_MAX_PHOTO_BYTES) {
-      throw createApiError_(
-        'VALIDATION_ERROR',
-        '画像サイズが5MBを超えています。'
-      );
-    }
-
+    var driveStartedAt = Date.now();
     var buildingFolder = getRecordBuildingFolder_(
       buildingRecord,
       normalized.buildingId
@@ -211,6 +234,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
         'Building record photo. photoId=' + normalized.photoId
       );
     }
+    timings.driveSaveMs = Date.now() - driveStartedAt;
 
     var photoRow = [
       normalized.photoId,
@@ -233,7 +257,6 @@ function handleUploadPhoto(requestId, payload, authContext) {
       new Date(),
       false
     ];
-    appendSheetRow_(spreadsheet, 'Photos', photoRow);
 
     var result = {
       photoId: normalized.photoId,
@@ -244,6 +267,14 @@ function handleUploadPhoto(requestId, payload, authContext) {
       stage: '3-4B'
     };
 
+    var sheetWriteStartedAt = Date.now();
+    appendSheetRow_(spreadsheet, 'Photos', photoRow);
+    attachUploadPerformance_(
+      result,
+      authContext,
+      timings,
+      handlerStartedAt
+    );
     appendRequestResult_(
       spreadsheet,
       normalized.requestId,
@@ -253,13 +284,41 @@ function handleUploadPhoto(requestId, payload, authContext) {
         buildingId: normalized.buildingId,
         visitId: normalized.visitId,
         photoId: normalized.photoId
-      }
+      },
+      true
+    );
+    timings.sheetWriteMs = Date.now() - sheetWriteStartedAt;
+    attachUploadPerformance_(
+      result,
+      authContext,
+      timings,
+      handlerStartedAt
     );
 
     return createApiResponse(true, requestId, result, null, null);
   } finally {
     lock.releaseLock();
   }
+}
+
+function attachUploadPerformance_(
+  result,
+  authContext,
+  timings,
+  handlerStartedAt
+) {
+  result.performance = {
+    authenticationMode: getOptionalString(
+      authContext.verificationMode
+    ) || 'tokeninfo',
+    authenticationMs: Number(timings.authenticationMs) || 0,
+    lockWaitMs: Number(timings.lockWaitMs) || 0,
+    lookupMs: Number(timings.lookupMs) || 0,
+    base64DecodeMs: Number(timings.base64DecodeMs) || 0,
+    driveSaveMs: Number(timings.driveSaveMs) || 0,
+    sheetWriteMs: Number(timings.sheetWriteMs) || 0,
+    handlerTotalMs: Date.now() - handlerStartedAt
+  };
 }
 
 /**
@@ -368,7 +427,8 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       {
         buildingId: normalized.buildingId,
         visitId: normalized.visitId
-      }
+      },
+      true
     );
 
     return createApiResponse(true, requestId, result, null, null);
@@ -599,17 +659,24 @@ function ensureRecordVisit_(spreadsheet, payload) {
   return { created: true, record: null };
 }
 
-function validateTagIds_(spreadsheet, tagIds, expectedType) {
-  if (tagIds.length === 0) {
-    return;
-  }
-
+function validateRecordTagIds_(spreadsheet, payload) {
   var tags = readSheetObjects_(spreadsheet, 'Tags');
   var byId = {};
   tags.forEach(function(tag) {
     byId[String(tag.tagId)] = tag;
   });
 
+  validateTagIdsWithIndex_(payload.designTagIds, 'design', byId);
+  validateTagIdsWithIndex_(payload.salesTagIds, 'sales', byId);
+  validateTagIdsWithIndex_(
+    payload.constructionTagIds,
+    'construction',
+    byId
+  );
+  validateTagIdsWithIndex_(payload.triggerTagIds, 'trigger', byId);
+}
+
+function validateTagIdsWithIndex_(tagIds, expectedType, byId) {
   tagIds.forEach(function(tagId) {
     var tag = byId[tagId];
     if (!tag || String(tag.tagType) !== expectedType) {
@@ -699,13 +766,47 @@ function requireActiveSheetRecord_(spreadsheet, sheetName, idField, id) {
 }
 
 function findSheetRecordById_(spreadsheet, sheetName, idField, id) {
-  var records = readSheetRecordsByField_(
-    spreadsheet,
-    sheetName,
-    idField,
-    id
-  );
-  return records.length === 0 ? null : records[0];
+  var definition = findSheetDefinition_(sheetName);
+  var fieldIndex = definition.headers.indexOf(idField);
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  if (sheet === null || fieldIndex < 0) {
+    throw createApiError_(
+      'INTERNAL_ERROR',
+      sheetName + 'シートの定義が正しくありません。'
+    );
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    return null;
+  }
+
+  var target = String(id).trim();
+  var match = sheet
+    .getRange(2, fieldIndex + 1, lastRow - 1, 1)
+    .createTextFinder(target)
+    .matchEntireCell(true)
+    .matchCase(true)
+    .useRegularExpression(false)
+    .findNext();
+  if (match === null) {
+    return null;
+  }
+
+  var rowNumber = match.getRow();
+  var values = sheet
+    .getRange(rowNumber, 1, 1, definition.headers.length)
+    .getValues()[0];
+  var object = {};
+  definition.headers.forEach(function(header, columnIndex) {
+    object[header] = values[columnIndex];
+  });
+
+  return {
+    rowNumber: rowNumber,
+    values: values,
+    object: object
+  };
 }
 
 function readSheetRecordsByField_(
@@ -790,17 +891,16 @@ function updateSheetRecord_(spreadsheet, sheetName, rowNumber, values) {
 }
 
 function getRequestResult_(spreadsheet, requestId, action) {
-  var records = readSheetRecordsByField_(
+  var record = findSheetRecordById_(
     spreadsheet,
     'Requests',
     'requestId',
     requestId
   );
-  if (records.length === 0) {
+  if (record === null) {
     return null;
   }
 
-  var record = records[0];
   if (String(record.object.action) !== action) {
     throw createApiError_(
       'CONFLICT',
@@ -823,16 +923,19 @@ function appendRequestResult_(
   requestId,
   action,
   result,
-  relatedIds
+  relatedIds,
+  assumeAbsent
 ) {
-  var existing = readSheetRecordsByField_(
-    spreadsheet,
-    'Requests',
-    'requestId',
-    requestId
-  );
-  if (existing.length > 0) {
-    return;
+  if (!assumeAbsent) {
+    var existing = findSheetRecordById_(
+      spreadsheet,
+      'Requests',
+      'requestId',
+      requestId
+    );
+    if (existing !== null) {
+      return;
+    }
   }
   appendSheetRow_(spreadsheet, 'Requests', [
     requestId,

@@ -314,6 +314,14 @@ void main() {
     expect(submissionService.finalizeCallCount, 1);
     expect(submissionService.uploadCallCount['photo-save-1'], 1);
     expect(submissionService.uploadCallCount['photo-save-2'], 1);
+    expect(
+      controller
+          .photoUploadResult('photo-save-1')
+          ?.performance
+          ?.authenticationMode,
+      'cache',
+    );
+    expect(controller.lastSubmissionDuration, isNotNull);
     expect(submissionService.lastBuildingName, '保存テスト建物');
     expect(submissionService.lastConstructionTagIds, <String>['tag-con-1']);
     expect(submissionService.lastTriggerTagIds, <String>['tag-trigger-1']);
@@ -616,6 +624,18 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
       byteSize: bytes.length,
       displayOrder: displayOrder,
       reused: false,
+      performance: const RecordUploadPerformance(
+        clientEncodeMs: 4,
+        clientRequestMs: 480,
+        authenticationMode: 'cache',
+        authenticationMs: 3,
+        lockWaitMs: 0,
+        lookupMs: 10,
+        base64DecodeMs: 2,
+        driveSaveMs: 300,
+        sheetWriteMs: 40,
+        handlerTotalMs: 370,
+      ),
     );
   }
 

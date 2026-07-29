@@ -34,6 +34,63 @@ class BeginRecordResult {
 }
 
 @immutable
+class RecordUploadPerformance {
+  const RecordUploadPerformance({
+    required this.clientEncodeMs,
+    required this.clientRequestMs,
+    required this.authenticationMode,
+    required this.authenticationMs,
+    required this.lockWaitMs,
+    required this.lookupMs,
+    required this.base64DecodeMs,
+    required this.driveSaveMs,
+    required this.sheetWriteMs,
+    required this.handlerTotalMs,
+  });
+
+  factory RecordUploadPerformance.fromJson(
+    Map<String, dynamic>? json, {
+    required int clientEncodeMs,
+    required int clientRequestMs,
+  }) {
+    final Map<String, dynamic> safe = json ?? const <String, dynamic>{};
+    return RecordUploadPerformance(
+      clientEncodeMs: clientEncodeMs,
+      clientRequestMs: clientRequestMs,
+      authenticationMode: _optionalString(safe['authenticationMode']),
+      authenticationMs: _optionalInt(safe['authenticationMs']),
+      lockWaitMs: _optionalInt(safe['lockWaitMs']),
+      lookupMs: _optionalInt(safe['lookupMs']),
+      base64DecodeMs: _optionalInt(safe['base64DecodeMs']),
+      driveSaveMs: _optionalInt(safe['driveSaveMs']),
+      sheetWriteMs: _optionalInt(safe['sheetWriteMs']),
+      handlerTotalMs: _optionalInt(safe['handlerTotalMs']),
+    );
+  }
+
+  final int clientEncodeMs;
+  final int clientRequestMs;
+  final String? authenticationMode;
+  final int? authenticationMs;
+  final int? lockWaitMs;
+  final int? lookupMs;
+  final int? base64DecodeMs;
+  final int? driveSaveMs;
+  final int? sheetWriteMs;
+  final int? handlerTotalMs;
+
+  Duration get clientEncodeDuration => Duration(milliseconds: clientEncodeMs);
+  Duration get clientRequestDuration => Duration(milliseconds: clientRequestMs);
+  Duration get clientTotalDuration =>
+      Duration(milliseconds: clientEncodeMs + clientRequestMs);
+
+  bool get hasServerBreakdown =>
+      authenticationMode != null ||
+      authenticationMs != null ||
+      handlerTotalMs != null;
+}
+
+@immutable
 class UploadRecordPhotoResult {
   const UploadRecordPhotoResult({
     required this.photoId,
@@ -41,15 +98,26 @@ class UploadRecordPhotoResult {
     required this.byteSize,
     required this.displayOrder,
     required this.reused,
+    this.performance,
   });
 
-  factory UploadRecordPhotoResult.fromJson(Map<String, dynamic> json) {
+  factory UploadRecordPhotoResult.fromJson(
+    Map<String, dynamic> json, {
+    int clientEncodeMs = 0,
+    int clientRequestMs = 0,
+  }) {
+    final Object? performanceJson = json['performance'];
     return UploadRecordPhotoResult(
       photoId: _requiredString(json['photoId'], 'photoId'),
       storageFileId: _requiredString(json['storageFileId'], 'storageFileId'),
       byteSize: _requiredInt(json['byteSize'], 'byteSize'),
       displayOrder: _requiredInt(json['displayOrder'], 'displayOrder'),
       reused: json['reused'] == true,
+      performance: RecordUploadPerformance.fromJson(
+        performanceJson is Map<String, dynamic> ? performanceJson : null,
+        clientEncodeMs: clientEncodeMs,
+        clientRequestMs: clientRequestMs,
+      ),
     );
   }
 
@@ -58,6 +126,7 @@ class UploadRecordPhotoResult {
   final int byteSize;
   final int displayOrder;
   final bool reused;
+  final RecordUploadPerformance? performance;
 }
 
 @immutable
@@ -102,4 +171,22 @@ int _requiredInt(Object? value, String fieldName) {
     return value.toInt();
   }
   throw FormatException('$fieldNameが数値ではありません。');
+}
+
+int? _optionalInt(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  return null;
+}
+
+String? _optionalString(Object? value) {
+  if (value is! String) {
+    return null;
+  }
+  final String result = value.trim();
+  return result.isEmpty ? null : result;
 }

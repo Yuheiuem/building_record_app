@@ -36,7 +36,7 @@ void main() {
 
     final BeginRecordResult result = await service.beginRecord(
       requestId: 'request-begin',
-      clientVersion: 'v0.13.0',
+      clientVersion: 'v0.13.1',
       idToken: 'test-id-token',
       buildingMode: 'new',
       buildingId: 'building-1',
@@ -79,6 +79,16 @@ void main() {
           'byteSize': 3,
           'displayOrder': 1,
           'reused': false,
+          'performance': <String, dynamic>{
+            'authenticationMode': 'cache',
+            'authenticationMs': 3,
+            'lockWaitMs': 0,
+            'lookupMs': 11,
+            'base64DecodeMs': 2,
+            'driveSaveMs': 300,
+            'sheetWriteMs': 40,
+            'handlerTotalMs': 370,
+          },
         },
         'errorCode': null,
         'message': null,
@@ -92,7 +102,7 @@ void main() {
 
     final UploadRecordPhotoResult result = await service.uploadPhoto(
       requestId: 'request-upload',
-      clientVersion: 'v0.13.0',
+      clientVersion: 'v0.13.1',
       idToken: 'test-id-token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -114,6 +124,9 @@ void main() {
     expect(payload['base64Data'], base64Encode(<int>[1, 2, 3]));
     expect(payload['latitude'], 35.681236);
     expect(result.storageFileId, 'drive-file-1');
+    expect(result.performance?.authenticationMode, 'cache');
+    expect(result.performance?.driveSaveMs, 300);
+    expect(result.performance?.clientRequestMs, greaterThanOrEqualTo(0));
     service.close();
   });
 
@@ -144,7 +157,7 @@ void main() {
 
     final FinalizeRecordResult result = await service.finalizeRecord(
       requestId: 'request-finalize',
-      clientVersion: 'v0.13.0',
+      clientVersion: 'v0.13.1',
       idToken: 'test-id-token',
       buildingId: 'building-1',
       visitId: 'visit-1',

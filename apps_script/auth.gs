@@ -1,16 +1,25 @@
 var TOKENINFO_ENDPOINT = 'https://oauth2.googleapis.com/tokeninfo';
+var AUTH_CACHE_PREFIX = 'verified-id-token:';
+var AUTH_CACHE_MAX_SECONDS = 300;
+var AUTH_CACHE_EXPIRY_SAFETY_SECONDS = 30;
 
 /**
  * API要求に含まれるGoogle IDトークンを検証する。
  *
- * 技術スパイクではGoogle tokeninfoエンドポイントを使用する。
- * 本番運用前に、公式クライアントライブラリを利用できる構成への
- * 移行要否を再確認する。
+ * 同じIDトークンを短時間に繰り返し検証する場合は、
+ * tokeninfoの検証結果をScript Cacheから再利用する。
+ * キャッシュキーにはトークン本文ではなくSHA-256ハッシュを使う。
  *
  * @param {Object} request
- * @return {{subject: string, email: string}}
+ * @return {{
+ *   subject: string,
+ *   email: string,
+ *   verificationMode: string,
+ *   verificationMs: number
+ * }}
  */
 function verifyRequestAuthentication(request) {
+  var startedAt = Date.now();
   var idToken = getOptionalString(request.idToken);
   if (idToken === null) {
     throw createApiError_(
@@ -29,13 +38,28 @@ function verifyRequestAuthentication(request) {
     'ALLOWED_EMAIL'
   ).toLowerCase();
 
+  var cachedContext = getCachedAuthentication_(
+    idToken,
+    expectedClientId,
+    allowedEmail,
+    properties
+  );
+  if (cachedContext !== null) {
+    cachedContext.verificationMode = 'cache';
+    cachedContext.verificationMs = Date.now() - startedAt;
+    return cachedContext;
+  }
+
   var tokenInfo = fetchGoogleTokenInfo_(idToken);
   validateTokenClaims_(tokenInfo, expectedClientId, allowedEmail);
   registerOrValidateAllowedSubject_(properties, tokenInfo.sub);
+  cacheVerifiedAuthentication_(idToken, tokenInfo, expectedClientId);
 
   return {
     subject: tokenInfo.sub,
-    email: tokenInfo.email
+    email: tokenInfo.email,
+    verificationMode: 'tokeninfo',
+    verificationMs: Date.now() - startedAt
   };
 }
 
@@ -130,6 +154,122 @@ function validateTokenClaims_(
       'このGoogleアカウントにはアクセス権限がありません。'
     );
   }
+}
+
+/**
+ * 検証済みIDトークンのキャッシュを取得する。
+ * Script Propertiesの現在値とも照合し、設定変更後の誤利用を防ぐ。
+ *
+ * @param {string} idToken
+ * @param {string} expectedClientId
+ * @param {string} allowedEmail
+ * @param {GoogleAppsScript.Properties.Properties} properties
+ * @return {{subject: string, email: string}|null}
+ */
+function getCachedAuthentication_(
+  idToken,
+  expectedClientId,
+  allowedEmail,
+  properties
+) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = buildAuthenticationCacheKey_(idToken);
+  var cachedText = cache.get(cacheKey);
+  if (cachedText === null) {
+    return null;
+  }
+
+  var cached;
+  try {
+    cached = JSON.parse(cachedText);
+  } catch (error) {
+    cache.remove(cacheKey);
+    return null;
+  }
+
+  var subject = getOptionalString(cached.subject);
+  var email = getOptionalString(cached.email);
+  var clientId = getOptionalString(cached.clientId);
+  var expiry = Number(cached.expiry);
+  var nowSeconds = Math.floor(Date.now() / 1000);
+  var allowedSubject = getOptionalString(
+    properties.getProperty('ALLOWED_SUB')
+  );
+
+  if (
+    subject === null ||
+    email === null ||
+    clientId !== expectedClientId ||
+    email.toLowerCase() !== allowedEmail ||
+    !Number.isFinite(expiry) ||
+    expiry <= nowSeconds + AUTH_CACHE_EXPIRY_SAFETY_SECONDS ||
+    allowedSubject === null ||
+    allowedSubject !== subject
+  ) {
+    cache.remove(cacheKey);
+    return null;
+  }
+
+  return {
+    subject: subject,
+    email: email
+  };
+}
+
+/**
+ * 検証済みIDトークンを最大5分間キャッシュする。
+ * IDトークンの残り有効時間が短い場合は、それより前に失効させる。
+ *
+ * @param {string} idToken
+ * @param {Object} tokenInfo
+ * @param {string} expectedClientId
+ */
+function cacheVerifiedAuthentication_(
+  idToken,
+  tokenInfo,
+  expectedClientId
+) {
+  var expiry = Number(tokenInfo.exp);
+  var nowSeconds = Math.floor(Date.now() / 1000);
+  var remainingSeconds = Math.floor(
+    expiry - nowSeconds - AUTH_CACHE_EXPIRY_SAFETY_SECONDS
+  );
+  var cacheSeconds = Math.min(
+    AUTH_CACHE_MAX_SECONDS,
+    remainingSeconds
+  );
+
+  if (!Number.isFinite(cacheSeconds) || cacheSeconds <= 0) {
+    return;
+  }
+
+  CacheService.getScriptCache().put(
+    buildAuthenticationCacheKey_(idToken),
+    JSON.stringify({
+      subject: tokenInfo.sub,
+      email: tokenInfo.email,
+      clientId: expectedClientId,
+      expiry: expiry
+    }),
+    cacheSeconds
+  );
+}
+
+/**
+ * IDトークン本文を保持しないキャッシュキーを作る。
+ *
+ * @param {string} idToken
+ * @return {string}
+ */
+function buildAuthenticationCacheKey_(idToken) {
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    idToken,
+    Utilities.Charset.UTF_8
+  );
+  var encoded = Utilities.base64EncodeWebSafe(digest)
+    .replace(/=+$/g, '');
+  return AUTH_CACHE_PREFIX + encoded;
 }
 
 /**

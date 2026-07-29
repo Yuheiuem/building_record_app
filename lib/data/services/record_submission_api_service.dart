@@ -136,6 +136,11 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     required String locationSource,
     required int displayOrder,
   }) async {
+    final Stopwatch encodeStopwatch = Stopwatch()..start();
+    final String base64Data = base64Encode(bytes);
+    encodeStopwatch.stop();
+
+    final Stopwatch requestStopwatch = Stopwatch()..start();
     final Map<String, dynamic> response = await _post(
       action: 'uploadPhoto',
       requestId: requestId,
@@ -148,7 +153,7 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
         'fileName': fileName,
         'mimeType': mimeType,
         'byteSize': bytes.length,
-        'base64Data': base64Encode(bytes),
+        'base64Data': base64Data,
         'takenAt': takenAt.toIso8601String(),
         'latitude': latitude,
         'longitude': longitude,
@@ -158,8 +163,13 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
       },
       timeout: _uploadTimeout,
     );
+    requestStopwatch.stop();
 
-    return UploadRecordPhotoResult.fromJson(_requiredData(response));
+    return UploadRecordPhotoResult.fromJson(
+      _requiredData(response),
+      clientEncodeMs: encodeStopwatch.elapsedMilliseconds,
+      clientRequestMs: requestStopwatch.elapsedMilliseconds,
+    );
   }
 
   @override
