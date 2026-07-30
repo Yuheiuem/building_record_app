@@ -1,34 +1,48 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../data/models/bootstrap_data.dart';
+import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
+import '../domain/browse_map_logic.dart';
 
 class BrowsePage extends StatefulWidget {
   const BrowsePage({
     required this.authService,
     this.bootstrapApiService,
+    this.enableNetworkTiles = true,
     super.key,
   });
 
   final AuthService authService;
   final BootstrapApiService? bootstrapApiService;
+  final bool enableNetworkTiles;
 
   @override
   State<BrowsePage> createState() => _BrowsePageState();
 }
 
 class _BrowsePageState extends State<BrowsePage> {
+  static const Duration _mapUpdateDelay = Duration(milliseconds: 250);
+
   late final BootstrapApiService _bootstrapApiService;
   late final bool _ownsBootstrapApiService;
 
   BootstrapData? _bootstrapData;
+  BrowseMapBounds? _visibleBounds;
+  String _searchQuery = '';
   String? _errorMessage;
   bool _isLoading = false;
+  int _mapRevision = 0;
+  Timer? _mapUpdateTimer;
 
   @override
   void initState() {
@@ -44,6 +58,7 @@ class _BrowsePageState extends State<BrowsePage> {
 
   @override
   void dispose() {
+    _mapUpdateTimer?.cancel();
     if (_ownsBootstrapApiService) {
       _bootstrapApiService.close();
     }
@@ -81,7 +96,9 @@ class _BrowsePageState extends State<BrowsePage> {
 
       setState(() {
         _bootstrapData = result;
+        _visibleBounds = boundsForBuildings(result.buildings);
         _isLoading = false;
+        _mapRevision += 1;
       });
     } on BootstrapApiException catch (error) {
       if (!mounted) {
@@ -91,7 +108,7 @@ class _BrowsePageState extends State<BrowsePage> {
         _isLoading = false;
         _errorMessage = error.message;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) {
         return;
       }
@@ -102,56 +119,159 @@ class _BrowsePageState extends State<BrowsePage> {
     }
   }
 
+  void _handleMapPositionChanged(MapCamera camera, bool hasGesture) {
+    final LatLngBounds bounds = camera.visibleBounds;
+    final BrowseMapBounds nextBounds = BrowseMapBounds(
+      north: bounds.north,
+      south: bounds.south,
+      east: bounds.east,
+      west: bounds.west,
+    );
+
+    _mapUpdateTimer?.cancel();
+    _mapUpdateTimer = Timer(_mapUpdateDelay, () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _visibleBounds = nextBounds;
+      });
+    });
+  }
+
+  List<Building> get _allCoordinateBuildings {
+    return coordinateBuildings(_bootstrapData?.buildings ?? const <Building>[]);
+  }
+
+  List<Building> get _visibleBuildings {
+    final List<Building> baseBuildings = _visibleBounds == null
+        ? _allCoordinateBuildings
+        : visibleBuildings(_allCoordinateBuildings, _visibleBounds!);
+    return filterBuildingsByQuery(baseBuildings, _searchQuery);
+  }
+
+  List<Building> get _markerBuildings {
+    return filterBuildingsByQuery(_allCoordinateBuildings, _searchQuery);
+  }
+
+  int get _missingCoordinateCount {
+    return (_bootstrapData?.buildings ?? const <Building>[])
+        .where(
+          (Building building) =>
+              !building.isDeleted && !buildingHasCoordinates(building),
+        )
+        .length;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final BootstrapData? data = _bootstrapData;
+    final List<Building> coordinateData = _allCoordinateBuildings;
+    final List<Building> shownBuildings = _visibleBuildings;
+    final Map<String, BuildingTag> tagsById = <String, BuildingTag>{
+      for (final BuildingTag tag in data?.tags ?? const <BuildingTag>[])
+        tag.tagId: tag,
+    };
+
     return Scaffold(
       appBar: AuthenticatedAppBar(
         authService: widget.authService,
         title: '地図・一覧で見る',
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 820),
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool wideLayout = constraints.maxWidth >= 1000;
+            final EdgeInsets pagePadding = EdgeInsets.symmetric(
+              horizontal: wideLayout ? 24 : 12,
+              vertical: 16,
+            );
+
+            final Widget toolbar = _BrowseToolbar(
+              data: data,
+              visibleCount: shownBuildings.length,
+              coordinateCount: coordinateData.length,
+              missingCoordinateCount: _missingCoordinateCount,
+              errorMessage: _errorMessage,
+              isLoading: _isLoading,
+              onRefresh: _loadBootstrapData,
+              onSearchChanged: (String value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+            );
+
+            final Widget workspace = _BrowseWorkspace(
+              wideLayout: wideLayout,
+              hasLoadedData: data != null,
+              coordinateBuildings: coordinateData,
+              markerBuildings: _markerBuildings,
+              visibleBuildings: shownBuildings,
+              tagsById: tagsById,
+              visibleBounds: _visibleBounds,
+              mapRevision: _mapRevision,
+              enableNetworkTiles: widget.enableNetworkTiles,
+              onPositionChanged: _handleMapPositionChanged,
+            );
+
+            if (wideLayout) {
+              return Padding(
+                padding: pagePadding,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    toolbar,
+                    const SizedBox(height: 12),
+                    Expanded(child: workspace),
+                    const SizedBox(height: 12),
+                    const AppVersionFooter(),
+                  ],
+                ),
+              );
+            }
+
+            return SingleChildScrollView(
+              padding: pagePadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  _ConnectionCard(
-                    data: _bootstrapData,
-                    errorMessage: _errorMessage,
-                    isLoading: _isLoading,
-                    onRefresh: _loadBootstrapData,
-                  ),
-                  const SizedBox(height: 16),
-                  _TagMasterCard(data: _bootstrapData),
-                  const SizedBox(height: 16),
-                  _BrowseNextStepCard(data: _bootstrapData),
-                  const SizedBox(height: 24),
+                  toolbar,
+                  const SizedBox(height: 12),
+                  workspace,
+                  const SizedBox(height: 20),
                   const AppVersionFooter(),
+                  const SizedBox(height: 8),
                 ],
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _ConnectionCard extends StatelessWidget {
-  const _ConnectionCard({
+class _BrowseToolbar extends StatelessWidget {
+  const _BrowseToolbar({
     required this.data,
+    required this.visibleCount,
+    required this.coordinateCount,
+    required this.missingCoordinateCount,
     required this.errorMessage,
     required this.isLoading,
     required this.onRefresh,
+    required this.onSearchChanged,
   });
 
   final BootstrapData? data;
+  final int visibleCount;
+  final int coordinateCount;
+  final int missingCoordinateCount;
   final String? errorMessage;
   final bool isLoading;
   final Future<void> Function() onRefresh;
+  final ValueChanged<String> onSearchChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -159,54 +279,102 @@ class _ConnectionCard extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  Icons.table_chart_outlined,
-                  color: colorScheme.primary,
-                  size: 34,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Sheets・API接続',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+            LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final bool compact = constraints.maxWidth < 720;
+                final Widget heading = Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.map_outlined,
+                      color: colorScheme.primary,
+                      size: 30,
                     ),
-                  ),
-                ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            '建物地図',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            data == null
+                                ? 'Google Sheetsから建物を取得します。'
+                                : '地図を動かすと、右の一覧を表示範囲に合わせて更新します。',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+
+                final Widget refreshButton = FilledButton.icon(
+                  key: const Key('refresh-browse-data'),
+                  onPressed: isLoading ? null : onRefresh,
+                  icon: isLoading
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  label: Text(isLoading ? '取得中' : '最新データを取得'),
+                );
+
+                if (compact) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      heading,
+                      const SizedBox(height: 12),
+                      refreshButton,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: <Widget>[
+                    Expanded(child: heading),
+                    const SizedBox(width: 16),
+                    refreshButton,
+                  ],
+                );
+              },
+            ),
+            if (errorMessage != null) ...<Widget>[
+              const SizedBox(height: 12),
+              _BrowseErrorPanel(message: errorMessage!),
+            ],
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                _BrowseCountChip(label: '地図表示範囲', count: visibleCount),
+                _BrowseCountChip(label: '座標あり', count: coordinateCount),
+                _BrowseCountChip(label: '座標なし', count: missingCoordinateCount),
+                if (data != null)
+                  _BrowseCountChip(label: '全建物', count: data!.counts.buildings),
               ],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Google Sheetsから建物とタグの初期データを取得します。',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('browse-building-search'),
+              onChanged: onSearchChanged,
+              decoration: const InputDecoration(
+                labelText: '建物を検索',
+                hintText: '建物名・検索名・住所',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
-            ),
-            const SizedBox(height: 20),
-            if (isLoading)
-              const _LoadingPanel()
-            else if (errorMessage != null)
-              _ErrorPanel(message: errorMessage!)
-            else if (data != null)
-              _SuccessPanel(data: data!)
-            else
-              const Text('まだデータを取得していません。'),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: isLoading ? null : onRefresh,
-              icon: isLoading
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-              label: Text(isLoading ? '取得中' : '最新データを取得'),
             ),
           ],
         ),
@@ -215,44 +383,37 @@ class _ConnectionCard extends StatelessWidget {
   }
 }
 
-class _LoadingPanel extends StatelessWidget {
-  const _LoadingPanel();
+class _BrowseCountChip extends StatelessWidget {
+  const _BrowseCountChip({required this.label, required this.count});
+
+  final String label;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
-      children: <Widget>[
-        SizedBox.square(
-          dimension: 22,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-        SizedBox(width: 12),
-        Expanded(child: Text('Google Sheetsからデータを取得しています。')),
-      ],
-    );
+    return Chip(label: Text('$label $count件'));
   }
 }
 
-class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.message});
+class _BrowseErrorPanel extends StatelessWidget {
+  const _BrowseErrorPanel({required this.message});
 
   final String message;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Icon(Icons.error_outline, color: colorScheme.onErrorContainer),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
@@ -265,60 +426,131 @@ class _ErrorPanel extends StatelessWidget {
   }
 }
 
-class _SuccessPanel extends StatelessWidget {
-  const _SuccessPanel({required this.data});
+class _BrowseWorkspace extends StatelessWidget {
+  const _BrowseWorkspace({
+    required this.wideLayout,
+    required this.hasLoadedData,
+    required this.coordinateBuildings,
+    required this.markerBuildings,
+    required this.visibleBuildings,
+    required this.tagsById,
+    required this.visibleBounds,
+    required this.mapRevision,
+    required this.enableNetworkTiles,
+    required this.onPositionChanged,
+  });
 
-  final BootstrapData data;
+  final bool wideLayout;
+  final bool hasLoadedData;
+  final List<Building> coordinateBuildings;
+  final List<Building> markerBuildings;
+  final List<Building> visibleBuildings;
+  final Map<String, BuildingTag> tagsById;
+  final BrowseMapBounds? visibleBounds;
+  final int mapRevision;
+  final bool enableNetworkTiles;
+  final void Function(MapCamera camera, bool hasGesture) onPositionChanged;
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final Widget map = _BuildingMapCard(
+      hasLoadedData: hasLoadedData,
+      coordinateBuildings: coordinateBuildings,
+      markerBuildings: markerBuildings,
+      visibleBounds: visibleBounds,
+      mapRevision: mapRevision,
+      enableNetworkTiles: enableNetworkTiles,
+      onPositionChanged: onPositionChanged,
+    );
+    final Widget list = _VisibleBuildingListCard(
+      buildings: visibleBuildings,
+      tagsById: tagsById,
+      fillAvailableHeight: wideLayout,
+    );
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(12),
-      ),
+    if (wideLayout) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Expanded(flex: 2, child: map),
+          const SizedBox(width: 12),
+          Expanded(child: list),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        SizedBox(height: 430, child: map),
+        const SizedBox(height: 12),
+        list,
+      ],
+    );
+  }
+}
+
+class _BuildingMapCard extends StatelessWidget {
+  const _BuildingMapCard({
+    required this.hasLoadedData,
+    required this.coordinateBuildings,
+    required this.markerBuildings,
+    required this.visibleBounds,
+    required this.mapRevision,
+    required this.enableNetworkTiles,
+    required this.onPositionChanged,
+  });
+
+  final bool hasLoadedData;
+  final List<Building> coordinateBuildings;
+  final List<Building> markerBuildings;
+  final BrowseMapBounds? visibleBounds;
+  final int mapRevision;
+  final bool enableNetworkTiles;
+  final void Function(MapCamera camera, bool hasGesture) onPositionChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool showLabels =
+        visibleBounds != null && shouldShowBuildingLabels(visibleBounds!);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(
-                Icons.check_circle_outline,
-                color: colorScheme.onPrimaryContainer,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Sheets接続成功',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: colorScheme.onPrimaryContainer,
-                  fontWeight: FontWeight.w700,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.public),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '地図',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+                Text(showLabels ? '建物名を表示' : 'ピンのみ'),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: <Widget>[
-              _CountChip(label: '建物', count: data.counts.buildings),
-              _CountChip(label: '訪問', count: data.counts.visits),
-              _CountChip(label: '写真', count: data.counts.photos),
-              _CountChip(label: 'タグ', count: data.counts.tags),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Schema ${data.schemaVersion} / ${data.stage}',
-            style: TextStyle(color: colorScheme.onPrimaryContainer),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'サーバー時刻 ${data.serverTime.toIso8601String()}',
-            style: TextStyle(color: colorScheme.onPrimaryContainer),
+          const Divider(height: 1),
+          Expanded(
+            child: !hasLoadedData
+                ? const _MapEmptyState(message: '建物データを取得すると地図を表示します。')
+                : coordinateBuildings.isEmpty
+                ? const _MapEmptyState(message: '座標が登録された建物はまだありません。')
+                : _BuildingMap(
+                    key: ValueKey<String>('browse-map-$mapRevision'),
+                    allBuildings: coordinateBuildings,
+                    markerBuildings: markerBuildings,
+                    showLabels: showLabels,
+                    enableNetworkTiles: enableNetworkTiles,
+                    onPositionChanged: onPositionChanged,
+                  ),
           ),
         ],
       ),
@@ -326,84 +558,26 @@ class _SuccessPanel extends StatelessWidget {
   }
 }
 
-class _CountChip extends StatelessWidget {
-  const _CountChip({required this.label, required this.count});
+class _MapEmptyState extends StatelessWidget {
+  const _MapEmptyState({required this.message});
 
-  final String label;
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    return Chip(label: Text('$label $count件'));
-  }
-}
-
-class _TagMasterCard extends StatelessWidget {
-  const _TagMasterCard({required this.data});
-
-  final BootstrapData? data;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  Icons.sell_outlined,
-                  color: Theme.of(context).colorScheme.primary,
-                  size: 34,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'タグマスター',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
+            Icon(
+              Icons.location_off_outlined,
+              size: 48,
+              color: Theme.of(context).colorScheme.primary,
             ),
-            const SizedBox(height: 8),
-            Text(
-              '有効なタグをGoogle Sheetsから取得し、保存先の種類ごとに表示します。',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (data == null)
-              const Text('初期データを取得するとタグが表示されます。')
-            else
-              LayoutBuilder(
-                builder: (BuildContext context, BoxConstraints constraints) {
-                  final double itemWidth = constraints.maxWidth >= 640
-                      ? (constraints.maxWidth - 12) / 2
-                      : constraints.maxWidth;
-
-                  return Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: BuildingTagType.values
-                        .map((BuildingTagType type) {
-                          final List<BuildingTag> tags = data!.tags
-                              .where((BuildingTag tag) => tag.tagType == type)
-                              .toList(growable: false);
-
-                          return SizedBox(
-                            width: itemWidth,
-                            child: _TagTypePanel(type: type, tags: tags),
-                          );
-                        })
-                        .toList(growable: false),
-                  );
-                },
-              ),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -411,99 +585,348 @@ class _TagMasterCard extends StatelessWidget {
   }
 }
 
-class _TagTypePanel extends StatelessWidget {
-  const _TagTypePanel({required this.type, required this.tags});
+class _BuildingMap extends StatelessWidget {
+  const _BuildingMap({
+    required this.allBuildings,
+    required this.markerBuildings,
+    required this.showLabels,
+    required this.enableNetworkTiles,
+    required this.onPositionChanged,
+    super.key,
+  });
 
-  final BuildingTagType type;
-  final List<BuildingTag> tags;
+  static const LatLng _fallbackCenter = LatLng(35.681236, 139.767125);
+
+  final List<Building> allBuildings;
+  final List<Building> markerBuildings;
+  final bool showLabels;
+  final bool enableNetworkTiles;
+  final void Function(MapCamera camera, bool hasGesture) onPositionChanged;
 
   @override
   Widget build(BuildContext context) {
+    final List<LatLng> points = allBuildings
+        .map(
+          (Building building) =>
+              LatLng(building.latitude!, building.longitude!),
+        )
+        .toList(growable: false);
+    final LatLng initialCenter = points.isEmpty
+        ? _fallbackCenter
+        : points.first;
+    final CameraFit? initialCameraFit = points.length >= 2
+        ? CameraFit.coordinates(
+            coordinates: points,
+            padding: const EdgeInsets.all(48),
+            maxZoom: 17,
+          )
+        : null;
+
+    return Stack(
+      children: <Widget>[
+        FlutterMap(
+          options: MapOptions(
+            initialCenter: initialCenter,
+            initialZoom: points.length == 1 ? 16 : 11,
+            initialCameraFit: initialCameraFit,
+            minZoom: 5,
+            maxZoom: 19,
+            onPositionChanged: onPositionChanged,
+          ),
+          children: <Widget>[
+            if (enableNetworkTiles)
+              TileLayer(
+                urlTemplate:
+                    'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
+                maxNativeZoom: 18,
+                userAgentPackageName: 'building_record_app',
+              ),
+            MarkerLayer(
+              markers: markerBuildings
+                  .map(
+                    (Building building) => _buildingMarker(
+                      context,
+                      building,
+                      showLabels: showLabels,
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+            const SimpleAttributionWidget(source: Text('国土地理院')),
+          ],
+        ),
+        Positioned(
+          left: 10,
+          top: 10,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.surface.withValues(alpha: 0.88),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                child: Text('ピンは選択せず、右の一覧から確認します。'),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Marker _buildingMarker(
+    BuildContext context,
+    Building building, {
+    required bool showLabels,
+  }) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final Widget pin = Icon(
+      Icons.location_on,
+      size: 34,
+      color: colorScheme.primary,
+      shadows: const <Shadow>[Shadow(color: Colors.white, blurRadius: 4)],
+    );
+
+    if (!showLabels) {
+      return Marker(
+        point: LatLng(building.latitude!, building.longitude!),
+        width: 42,
+        height: 42,
+        alignment: Alignment.bottomCenter,
+        child: IgnorePointer(child: pin),
+      );
+    }
+
+    return Marker(
+      point: LatLng(building.latitude!, building.longitude!),
+      width: 170,
+      height: 76,
+      alignment: Alignment.bottomCenter,
+      child: IgnorePointer(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              constraints: const BoxConstraints(maxWidth: 164),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: colorScheme.surface.withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Text(
+                building.buildingName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            pin,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VisibleBuildingListCard extends StatelessWidget {
+  const _VisibleBuildingListCard({
+    required this.buildings,
+    required this.tagsById,
+    required this.fillAvailableHeight,
+  });
+
+  final List<Building> buildings;
+  final Map<String, BuildingTag> tagsById;
+  final bool fillAvailableHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget listContent = buildings.isEmpty
+        ? const _BuildingListEmptyState()
+        : ListView.separated(
+            key: const Key('visible-building-list'),
+            shrinkWrap: !fillAvailableHeight,
+            physics: fillAvailableHeight
+                ? const ClampingScrollPhysics()
+                : const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(12),
+            itemCount: buildings.length,
+            separatorBuilder: (BuildContext context, int index) =>
+                const SizedBox(height: 8),
+            itemBuilder: (BuildContext context, int index) {
+              return _BuildingListItem(
+                building: buildings[index],
+                tagsById: tagsById,
+              );
+            },
+          );
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: fillAvailableHeight ? MainAxisSize.max : MainAxisSize.min,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+            child: Row(
+              children: <Widget>[
+                const Icon(Icons.format_list_bulleted),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '表示範囲の建物',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        '北から順に表示しています。',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                Text('${buildings.length}件'),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          if (fillAvailableHeight)
+            Expanded(child: listContent)
+          else
+            listContent,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Text(
+              '建物詳細・訪問履歴・写真は段階4-2で開けるようにします。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BuildingListEmptyState extends StatelessWidget {
+  const _BuildingListEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.search_off_outlined,
+            size: 42,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(height: 10),
+          const Text('現在の地図範囲または検索条件に合う建物はありません。', textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+}
+
+class _BuildingListItem extends StatelessWidget {
+  const _BuildingListItem({required this.building, required this.tagsById});
+
+  final Building building;
+  final Map<String, BuildingTag> tagsById;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<String> tagNames = _resolveTagNames(building, tagsById);
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      key: ValueKey<String>('browse-building-${building.buildingId}'),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: colorScheme.surfaceContainerLow,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              Icon(Icons.apartment_outlined, color: colorScheme.primary),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  type.displayName,
+                  building.buildingName,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              Text('${tags.length}件'),
             ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            type.scopeLabel,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+          if (building.address != null) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              building.address!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (tags.isEmpty)
-            Text('未登録', style: TextStyle(color: colorScheme.onSurfaceVariant))
-          else
+          ],
+          if (tagNames.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 10),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: tags
-                  .map((BuildingTag tag) => Chip(label: Text(tag.tagName)))
+              spacing: 6,
+              runSpacing: 6,
+              children: tagNames
+                  .map(
+                    (String tagName) => Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(tagName),
+                    ),
+                  )
                   .toList(growable: false),
             ),
+          ],
         ],
       ),
     );
   }
-}
 
-class _BrowseNextStepCard extends StatelessWidget {
-  const _BrowseNextStepCard({required this.data});
+  List<String> _resolveTagNames(
+    Building building,
+    Map<String, BuildingTag> tagsById,
+  ) {
+    final List<String> tagIds = <String>[
+      ...building.designTags,
+      ...building.salesTags,
+      ...building.constructionTags,
+    ];
+    final List<String> names = <String>[];
+    final Set<String> seen = <String>{};
 
-  final BootstrapData? data;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool hasBuildings = data?.buildings.isNotEmpty ?? false;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: <Widget>[
-            Icon(
-              Icons.map_outlined,
-              size: 48,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              hasBuildings ? '建物データを取得しました' : '建物データはまだありません',
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hasBuildings
-                  ? '次の段階で、取得した建物を地図と一覧へ表示します。'
-                  : '段階2-2ではタグマスターの初期投入と種類別表示を整備しました。建物登録は後続段階で実装します。',
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
+    for (final String tagId in tagIds) {
+      final String? name = tagsById[tagId]?.tagName;
+      if (name != null && seen.add(name)) {
+        names.add(name);
+      }
+    }
+    return names;
   }
 }

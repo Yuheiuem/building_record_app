@@ -15,6 +15,7 @@ import 'package:building_record_app/data/services/tag_api_service.dart';
 import 'package:building_record_app/features/record/presentation/record_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:building_record_app/core/config/app_config.dart';
 
 void main() {
   testWidgets('初期状態では写真・建物・訪問の入力欄を表示する', (WidgetTester tester) async {
@@ -39,7 +40,10 @@ void main() {
     expect(find.text('今回の訪問'), findsOneWidget);
     expect(find.byKey(const Key('visit-impression-field')), findsOneWidget);
     expect(find.byKey(const Key('capture-current-location')), findsOneWidget);
-    expect(find.text('段階 3-4B / v0.13.2'), findsOneWidget);
+    expect(
+      find.text('${AppConfig.stage} / ${AppConfig.version}'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('複数写真を選択して個別に削除できる', (WidgetTester tester) async {

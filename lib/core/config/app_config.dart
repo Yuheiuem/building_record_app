@@ -1,7 +1,7 @@
 abstract final class AppConfig {
   static const String workingTitle = '建築記録Webアプリ';
-  static const String version = 'v0.13.2';
-  static const String stage = '段階 3-4B';
+  static const String version = 'v0.14.0';
+  static const String stage = '段階 4-1';
 
   static const int driveSpikeMaxPhotoBytes = 2 * 1024 * 1024;
 

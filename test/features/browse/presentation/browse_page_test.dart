@@ -1,4 +1,6 @@
 import 'package:building_record_app/data/models/bootstrap_data.dart';
+import 'package:building_record_app/data/models/building.dart';
+import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/features/browse/presentation/browse_page.dart';
@@ -6,7 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('タグマスターを4種類に分けて表示し再取得できる', (WidgetTester tester) async {
+  testWidgets('建物を地図範囲の一覧へ表示し検索と再取得ができる', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 900);
+    addTearDown(tester.view.reset);
+
     final _FakeAuthService authService = _FakeAuthService();
     final _FakeBootstrapApiService apiService = _FakeBootstrapApiService();
 
@@ -15,30 +21,37 @@ void main() {
         home: BrowsePage(
           authService: authService,
           bootstrapApiService: apiService,
+          enableNetworkTiles: false,
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
 
     expect(apiService.callCount, 1);
     expect(apiService.lastIdToken, 'test-id-token');
-    expect(find.text('Sheets接続成功'), findsOneWidget);
-    expect(find.text('タグ 5件'), findsOneWidget);
-    expect(find.text('タグマスター'), findsOneWidget);
-    expect(find.text('きっかけ'), findsOneWidget);
-    expect(find.text('設計'), findsOneWidget);
-    expect(find.text('営業'), findsOneWidget);
-    expect(find.text('施工'), findsOneWidget);
-    expect(find.text('営業の仕事'), findsOneWidget);
-    expect(find.text('設計研修'), findsOneWidget);
-    expect(find.text('個人旅行'), findsOneWidget);
-    expect(find.text('当社施工'), findsOneWidget);
-    expect(find.text('鹿島施工'), findsOneWidget);
-    expect(find.text('未登録'), findsNWidgets(2));
+    expect(find.text('建物地図'), findsOneWidget);
+    expect(find.text('地図表示範囲 2件'), findsOneWidget);
+    expect(find.text('座標あり 2件'), findsOneWidget);
+    expect(find.text('座標なし 1件'), findsOneWidget);
+    expect(find.text('北の建物'), findsOneWidget);
+    expect(find.text('南の建物'), findsOneWidget);
+    expect(find.text('国土地理院'), findsOneWidget);
+    expect(find.text('設計第一部'), findsOneWidget);
 
-    await tester.ensureVisible(find.text('最新データを取得'));
-    await tester.tap(find.text('最新データを取得'));
-    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('browse-building-search')),
+      '南',
+    );
+    await tester.pump();
+
+    expect(find.text('北の建物'), findsNothing);
+    expect(find.text('南の建物'), findsOneWidget);
+    expect(find.text('地図表示範囲 1件'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('refresh-browse-data')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
 
     expect(apiService.callCount, 2);
   });
@@ -78,51 +91,81 @@ class _FakeBootstrapApiService implements BootstrapApiService {
     callCount += 1;
     lastIdToken = idToken;
 
-    return BootstrapData.fromJson(<String, dynamic>{
-      'ok': true,
-      'requestId': requestId,
-      'serverTime': '2026-07-28T12:00:00+09:00',
-      'data': <String, dynamic>{
-        'schemaVersion': '1.0',
-        'stage': '2-2',
-        'buildings': <Object?>[],
-        'tags': <Map<String, dynamic>>[
-          _tagJson('tag-trigger-sales-work', 'trigger', '営業の仕事', 10),
-          _tagJson('tag-trigger-design-training', 'trigger', '設計研修', 20),
-          _tagJson('tag-trigger-personal-travel', 'trigger', '個人旅行', 30),
-          _tagJson('tag-construction-in-house', 'construction', '当社施工', 10),
-          _tagJson('tag-construction-kajima', 'construction', '鹿島施工', 20),
-        ],
-        'counts': <String, dynamic>{
-          'buildings': 0,
-          'visits': 0,
-          'photos': 0,
-          'tags': 5,
-        },
-      },
-      'errorCode': null,
-      'message': null,
-    });
+    return BootstrapData(
+      requestId: requestId,
+      serverTime: DateTime.parse('2026-07-30T14:30:00+09:00'),
+      schemaVersion: '1.0',
+      stage: '4-1',
+      buildings: <Building>[
+        _building(
+          id: 'north',
+          name: '北の建物',
+          latitude: 35.72,
+          longitude: 139.70,
+          address: '東京都北区',
+          designTags: const <String>['tag-design-1'],
+        ),
+        _building(
+          id: 'south',
+          name: '南の建物',
+          latitude: 35.64,
+          longitude: 139.70,
+          address: '東京都品川区',
+        ),
+        _building(
+          id: 'missing',
+          name: '座標なしの建物',
+          latitude: null,
+          longitude: null,
+        ),
+      ],
+      tags: const <BuildingTag>[
+        BuildingTag(
+          tagId: 'tag-design-1',
+          tagType: BuildingTagType.design,
+          tagName: '設計第一部',
+          normalizedName: '設計第一部',
+          displayOrder: 10,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        ),
+      ],
+      counts: const BootstrapCounts(
+        buildings: 3,
+        visits: 4,
+        photos: 5,
+        tags: 1,
+      ),
+    );
   }
 
   @override
   void close() {}
 }
 
-Map<String, dynamic> _tagJson(
-  String tagId,
-  String tagType,
-  String tagName,
-  int displayOrder,
-) {
-  return <String, dynamic>{
-    'tagId': tagId,
-    'tagType': tagType,
-    'tagName': tagName,
-    'normalizedName': tagName,
-    'displayOrder': displayOrder,
-    'isActive': true,
-    'createdAt': '2026-07-28T10:00:00+09:00',
-    'updatedAt': '2026-07-28T10:00:00+09:00',
-  };
+Building _building({
+  required String id,
+  required String name,
+  required double? latitude,
+  required double? longitude,
+  String? address,
+  List<String> designTags = const <String>[],
+}) {
+  return Building(
+    buildingId: id,
+    buildingName: name,
+    searchName: name,
+    latitude: latitude,
+    longitude: longitude,
+    address: address,
+    designTags: designTags,
+    salesTags: const <String>[],
+    constructionTags: const <String>[],
+    driveFolderId: null,
+    coverPhotoId: null,
+    createdAt: null,
+    updatedAt: null,
+    isDeleted: false,
+  );
 }
