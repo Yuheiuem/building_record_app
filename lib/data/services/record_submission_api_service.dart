@@ -7,6 +7,65 @@ import 'package:http/http.dart' as http;
 import '../../core/config/app_config.dart';
 import '../models/record_submission_result.dart';
 
+class RecordPreparationPayload {
+  const RecordPreparationPayload({
+    required this.requestId,
+    required this.buildingMode,
+    required this.buildingId,
+    required this.visitId,
+    required this.buildingName,
+    required this.designTagIds,
+    required this.salesTagIds,
+    required this.constructionTagIds,
+    required this.visitedAt,
+    required this.triggerTagIds,
+    required this.impression,
+    required this.latitude,
+    required this.longitude,
+    required this.accuracyM,
+    required this.locationSource,
+    required this.expectedPhotoCount,
+  });
+
+  final String requestId;
+  final String buildingMode;
+  final String buildingId;
+  final String visitId;
+  final String? buildingName;
+  final List<String> designTagIds;
+  final List<String> salesTagIds;
+  final List<String> constructionTagIds;
+  final DateTime visitedAt;
+  final List<String> triggerTagIds;
+  final String impression;
+  final double latitude;
+  final double longitude;
+  final double? accuracyM;
+  final String locationSource;
+  final int expectedPhotoCount;
+
+  Map<String, Object?> toJson() {
+    return <String, Object?>{
+      'requestId': requestId,
+      'buildingMode': buildingMode,
+      'buildingId': buildingId,
+      'visitId': visitId,
+      'buildingName': buildingName,
+      'designTagIds': designTagIds,
+      'salesTagIds': salesTagIds,
+      'constructionTagIds': constructionTagIds,
+      'visitedAt': visitedAt.toIso8601String(),
+      'triggerTagIds': triggerTagIds,
+      'impression': impression,
+      'latitude': latitude,
+      'longitude': longitude,
+      'accuracyM': accuracyM,
+      'locationSource': locationSource,
+      'expectedPhotoCount': expectedPhotoCount,
+    };
+  }
+}
+
 abstract interface class RecordSubmissionApiService {
   Future<BeginRecordResult> beginRecord({
     required String requestId,
@@ -45,6 +104,8 @@ abstract interface class RecordSubmissionApiService {
     required double? accuracyM,
     required String locationSource,
     required int displayOrder,
+    RecordPreparationPayload? recordPreparation,
+    bool finalizeAfterUpload = false,
   });
 
   Future<FinalizeRecordResult> finalizeRecord({
@@ -135,6 +196,8 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     required double? accuracyM,
     required String locationSource,
     required int displayOrder,
+    RecordPreparationPayload? recordPreparation,
+    bool finalizeAfterUpload = false,
   }) async {
     final Stopwatch encodeStopwatch = Stopwatch()..start();
     final String base64Data = base64Encode(bytes);
@@ -160,6 +223,9 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
         'accuracyM': accuracyM,
         'locationSource': locationSource,
         'displayOrder': displayOrder,
+        if (recordPreparation != null)
+          'recordDraft': recordPreparation.toJson(),
+        if (finalizeAfterUpload) 'finalizeAfterUpload': true,
       },
       timeout: _uploadTimeout,
     );

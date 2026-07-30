@@ -27,6 +27,14 @@ void main() {
         'byteSize': 1234,
         'displayOrder': 1,
         'reused': true,
+        'buildingId': 'building-1',
+        'visitId': 'visit-1',
+        'recordPrepared': true,
+        'buildingCreated': true,
+        'visitCreated': true,
+        'recordCompleted': true,
+        'photoCount': 1,
+        'saveMode': 'combined_photo_step',
         'performance': <String, dynamic>{
           'authenticationMode': 'cache',
           'authenticationMs': 4,
@@ -35,6 +43,8 @@ void main() {
           'base64DecodeMs': 8,
           'driveSaveMs': 420,
           'sheetWriteMs': 55,
+          'draftPreparationMs': 120,
+          'finalizeMs': 80,
           'handlerTotalMs': 510,
         },
       },
@@ -46,7 +56,14 @@ void main() {
     expect(result.storageFileId, 'drive-file-1');
     expect(result.reused, isTrue);
     expect(result.performance?.authenticationMode, 'cache');
+    expect(result.buildingId, 'building-1');
+    expect(result.recordPrepared, isTrue);
+    expect(result.recordCompleted, isTrue);
+    expect(result.photoCount, 1);
+    expect(result.saveMode, 'combined_photo_step');
     expect(result.performance?.driveSaveMs, 420);
+    expect(result.performance?.draftPreparationMs, 120);
+    expect(result.performance?.finalizeMs, 80);
     expect(result.performance?.clientTotalDuration.inMilliseconds, 646);
   });
 

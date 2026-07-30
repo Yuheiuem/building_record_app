@@ -36,7 +36,7 @@ void main() {
 
     final BeginRecordResult result = await service.beginRecord(
       requestId: 'request-begin',
-      clientVersion: 'v0.13.1',
+      clientVersion: 'v0.13.2',
       idToken: 'test-id-token',
       buildingMode: 'new',
       buildingId: 'building-1',
@@ -79,6 +79,14 @@ void main() {
           'byteSize': 3,
           'displayOrder': 1,
           'reused': false,
+          'buildingId': 'building-1',
+          'visitId': 'visit-1',
+          'recordPrepared': true,
+          'buildingCreated': true,
+          'visitCreated': true,
+          'recordCompleted': true,
+          'photoCount': 1,
+          'saveMode': 'combined_photo_step',
           'performance': <String, dynamic>{
             'authenticationMode': 'cache',
             'authenticationMs': 3,
@@ -87,6 +95,8 @@ void main() {
             'base64DecodeMs': 2,
             'driveSaveMs': 300,
             'sheetWriteMs': 40,
+            'draftPreparationMs': 120,
+            'finalizeMs': 80,
             'handlerTotalMs': 370,
           },
         },
@@ -102,7 +112,7 @@ void main() {
 
     final UploadRecordPhotoResult result = await service.uploadPhoto(
       requestId: 'request-upload',
-      clientVersion: 'v0.13.1',
+      clientVersion: 'v0.13.2',
       idToken: 'test-id-token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -116,6 +126,25 @@ void main() {
       accuracyM: 8.4,
       locationSource: 'gps',
       displayOrder: 1,
+      recordPreparation: RecordPreparationPayload(
+        requestId: 'request-record',
+        buildingMode: 'new',
+        buildingId: 'building-1',
+        visitId: 'visit-1',
+        buildingName: '第一ビル',
+        designTagIds: const <String>['tag-design-1'],
+        salesTagIds: const <String>[],
+        constructionTagIds: const <String>['tag-construction-1'],
+        visitedAt: DateTime.parse('2026-07-29T15:00:00+09:00'),
+        triggerTagIds: const <String>['tag-trigger-1'],
+        impression: '印象的だった。',
+        latitude: 35.681236,
+        longitude: 139.767125,
+        accuracyM: 8.4,
+        locationSource: 'gps',
+        expectedPhotoCount: 1,
+      ),
+      finalizeAfterUpload: true,
     );
 
     expect(sentBody['action'], 'uploadPhoto');
@@ -123,7 +152,16 @@ void main() {
         sentBody['payload'] as Map<String, dynamic>;
     expect(payload['base64Data'], base64Encode(<int>[1, 2, 3]));
     expect(payload['latitude'], 35.681236);
+    expect(payload['finalizeAfterUpload'], isTrue);
+    final Map<String, dynamic> recordDraft =
+        payload['recordDraft'] as Map<String, dynamic>;
+    expect(recordDraft['requestId'], 'request-record');
+    expect(recordDraft['buildingName'], '第一ビル');
+    expect(recordDraft['expectedPhotoCount'], 1);
     expect(result.storageFileId, 'drive-file-1');
+    expect(result.recordPrepared, isTrue);
+    expect(result.recordCompleted, isTrue);
+    expect(result.photoCount, 1);
     expect(result.performance?.authenticationMode, 'cache');
     expect(result.performance?.driveSaveMs, 300);
     expect(result.performance?.clientRequestMs, greaterThanOrEqualTo(0));
@@ -157,7 +195,7 @@ void main() {
 
     final FinalizeRecordResult result = await service.finalizeRecord(
       requestId: 'request-finalize',
-      clientVersion: 'v0.13.1',
+      clientVersion: 'v0.13.2',
       idToken: 'test-id-token',
       buildingId: 'building-1',
       visitId: 'visit-1',

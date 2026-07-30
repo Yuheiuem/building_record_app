@@ -310,10 +310,12 @@ void main() {
 
     expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
     expect(controller.uploadedPhotoCount, 2);
-    expect(submissionService.beginCallCount, 1);
-    expect(submissionService.finalizeCallCount, 1);
+    expect(submissionService.beginCallCount, 0);
+    expect(submissionService.finalizeCallCount, 0);
     expect(submissionService.uploadCallCount['photo-save-1'], 1);
     expect(submissionService.uploadCallCount['photo-save-2'], 1);
+    expect(submissionService.preparationCallCount, 1);
+    expect(submissionService.combinedFinalizeCallCount, 1);
     expect(
       controller
           .photoUploadResult('photo-save-1')
@@ -355,10 +357,12 @@ void main() {
 
     expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
     expect(controller.uploadedPhotoCount, 2);
-    expect(submissionService.beginCallCount, 1);
+    expect(submissionService.beginCallCount, 0);
     expect(submissionService.uploadCallCount['photo-retry-1'], 1);
     expect(submissionService.uploadCallCount['photo-retry-2'], 2);
-    expect(submissionService.finalizeCallCount, 1);
+    expect(submissionService.preparationCallCount, 1);
+    expect(submissionService.combinedFinalizeCallCount, 1);
+    expect(submissionService.finalizeCallCount, 0);
   });
 }
 
@@ -553,6 +557,8 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
   final Map<String, int> uploadCallCount = <String, int>{};
   int beginCallCount = 0;
   int finalizeCallCount = 0;
+  int preparationCallCount = 0;
+  int combinedFinalizeCallCount = 0;
   String? lastBuildingName;
   List<String>? lastConstructionTagIds;
   List<String>? lastTriggerTagIds;
@@ -613,18 +619,42 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
     required double? accuracyM,
     required String locationSource,
     required int displayOrder,
+    RecordPreparationPayload? recordPreparation,
+    bool finalizeAfterUpload = false,
   }) async {
     uploadCallCount[photoId] = (uploadCallCount[photoId] ?? 0) + 1;
+
+    if (recordPreparation != null) {
+      preparationCallCount += 1;
+      lastBuildingName = recordPreparation.buildingName;
+      lastConstructionTagIds = recordPreparation.constructionTagIds;
+      lastTriggerTagIds = recordPreparation.triggerTagIds;
+      _buildingId = recordPreparation.buildingId;
+      _visitId = recordPreparation.visitId;
+    }
+
     if (_remainingFailures.remove(photoId)) {
       throw const RecordSubmissionApiException('テスト用の送信失敗');
     }
+    if (finalizeAfterUpload) {
+      combinedFinalizeCallCount += 1;
+    }
+
     return UploadRecordPhotoResult(
       photoId: photoId,
       storageFileId: 'storage-$photoId',
       byteSize: bytes.length,
       displayOrder: displayOrder,
       reused: false,
-      performance: const RecordUploadPerformance(
+      buildingId: _buildingId ?? buildingId,
+      visitId: _visitId ?? visitId,
+      recordPrepared: recordPreparation != null,
+      buildingCreated: recordPreparation?.buildingMode == 'new',
+      visitCreated: recordPreparation != null,
+      recordCompleted: finalizeAfterUpload,
+      photoCount: finalizeAfterUpload ? uploadCallCount.length : null,
+      saveMode: 'combined_photo_step',
+      performance: RecordUploadPerformance(
         clientEncodeMs: 4,
         clientRequestMs: 480,
         authenticationMode: 'cache',
@@ -634,6 +664,8 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
         base64DecodeMs: 2,
         driveSaveMs: 300,
         sheetWriteMs: 40,
+        draftPreparationMs: recordPreparation == null ? 0 : 120,
+        finalizeMs: finalizeAfterUpload ? 80 : 0,
         handlerTotalMs: 370,
       ),
     );

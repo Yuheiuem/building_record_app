@@ -45,6 +45,8 @@ class RecordUploadPerformance {
     required this.base64DecodeMs,
     required this.driveSaveMs,
     required this.sheetWriteMs,
+    this.draftPreparationMs,
+    this.finalizeMs,
     required this.handlerTotalMs,
   });
 
@@ -64,6 +66,8 @@ class RecordUploadPerformance {
       base64DecodeMs: _optionalInt(safe['base64DecodeMs']),
       driveSaveMs: _optionalInt(safe['driveSaveMs']),
       sheetWriteMs: _optionalInt(safe['sheetWriteMs']),
+      draftPreparationMs: _optionalInt(safe['draftPreparationMs']),
+      finalizeMs: _optionalInt(safe['finalizeMs']),
       handlerTotalMs: _optionalInt(safe['handlerTotalMs']),
     );
   }
@@ -77,6 +81,8 @@ class RecordUploadPerformance {
   final int? base64DecodeMs;
   final int? driveSaveMs;
   final int? sheetWriteMs;
+  final int? draftPreparationMs;
+  final int? finalizeMs;
   final int? handlerTotalMs;
 
   Duration get clientEncodeDuration => Duration(milliseconds: clientEncodeMs);
@@ -98,6 +104,14 @@ class UploadRecordPhotoResult {
     required this.byteSize,
     required this.displayOrder,
     required this.reused,
+    this.buildingId,
+    this.visitId,
+    this.recordPrepared = false,
+    this.buildingCreated = false,
+    this.visitCreated = false,
+    this.recordCompleted = false,
+    this.photoCount,
+    this.saveMode,
     this.performance,
   });
 
@@ -113,6 +127,14 @@ class UploadRecordPhotoResult {
       byteSize: _requiredInt(json['byteSize'], 'byteSize'),
       displayOrder: _requiredInt(json['displayOrder'], 'displayOrder'),
       reused: json['reused'] == true,
+      buildingId: _optionalString(json['buildingId']),
+      visitId: _optionalString(json['visitId']),
+      recordPrepared: json['recordPrepared'] == true,
+      buildingCreated: json['buildingCreated'] == true,
+      visitCreated: json['visitCreated'] == true,
+      recordCompleted: json['recordCompleted'] == true,
+      photoCount: _optionalInt(json['photoCount']),
+      saveMode: _optionalString(json['saveMode']),
       performance: RecordUploadPerformance.fromJson(
         performanceJson is Map<String, dynamic> ? performanceJson : null,
         clientEncodeMs: clientEncodeMs,
@@ -126,6 +148,14 @@ class UploadRecordPhotoResult {
   final int byteSize;
   final int displayOrder;
   final bool reused;
+  final String? buildingId;
+  final String? visitId;
+  final bool recordPrepared;
+  final bool buildingCreated;
+  final bool visitCreated;
+  final bool recordCompleted;
+  final int? photoCount;
+  final String? saveMode;
   final RecordUploadPerformance? performance;
 }
 

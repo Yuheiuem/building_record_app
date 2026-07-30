@@ -91,7 +91,6 @@ class RecordDraftController extends ChangeNotifier {
   BeginRecordResult? _beginRecordResult;
   FinalizeRecordResult? _finalizeRecordResult;
   String? _beginRequestId;
-  String? _finalizeRequestId;
   String? _submissionBuildingId;
   String? _submissionVisitId;
   DateTime? _submissionVisitedAt;
@@ -604,7 +603,6 @@ class RecordDraftController extends ChangeNotifier {
     const Uuid uuid = Uuid();
 
     _beginRequestId ??= uuid.v4();
-    _finalizeRequestId ??= uuid.v4();
     _submissionVisitId ??= uuid.v4();
     _submissionBuildingId ??= _buildingMode == RecordBuildingMode.newBuilding
         ? uuid.v4()
@@ -635,39 +633,8 @@ class RecordDraftController extends ChangeNotifier {
     bool refreshBootstrapAfterSuccess = false;
 
     try {
-      _beginRecordResult ??= await _recordSubmissionApiService.beginRecord(
-        requestId: _beginRequestId!,
-        clientVersion: AppConfig.version,
-        idToken: idToken,
-        buildingMode: _buildingMode == RecordBuildingMode.newBuilding
-            ? 'new'
-            : 'existing',
-        buildingId: _submissionBuildingId!,
-        visitId: _submissionVisitId!,
-        buildingName: _buildingMode == RecordBuildingMode.newBuilding
-            ? _newBuildingName.trim()
-            : null,
-        designTagIds: _buildingTagIdsForSubmission(BuildingTagType.design),
-        salesTagIds: _buildingTagIdsForSubmission(BuildingTagType.sales),
-        constructionTagIds: _buildingTagIdsForSubmission(
-          BuildingTagType.construction,
-        ),
-        visitedAt: _submissionVisitedAt!,
-        triggerTagIds: _sortedIds(_selectedTriggerTagIds),
-        impression: _impression.trim(),
-        latitude: location.latitude,
-        longitude: location.longitude,
-        accuracyM: location.accuracyM,
-        locationSource: location.source.apiValue,
-        expectedPhotoCount: _photos.length,
-      );
-
-      _submissionBuildingId = _beginRecordResult!.buildingId;
-      _submissionVisitId = _beginRecordResult!.visitId;
-      _submissionPhase = RecordSubmissionPhase.uploading;
-      notifyListeners();
-
       final List<String> failedDetails = <String>[];
+
       for (int index = 0; index < _photos.length; index += 1) {
         final RecordDraftPhoto photo = _photos[index];
         if (photoUploadStatus(photo.photoId) ==
@@ -675,6 +642,11 @@ class RecordDraftController extends ChangeNotifier {
           continue;
         }
 
+        final bool includeRecordDraft = _beginRecordResult == null;
+        final bool finalizeAfterUpload = index == _photos.length - 1;
+        _submissionPhase = finalizeAfterUpload
+            ? RecordSubmissionPhase.finalizing
+            : RecordSubmissionPhase.uploading;
         _currentUploadingPhotoId = photo.photoId;
         _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploading;
         notifyListeners();
@@ -697,10 +669,65 @@ class RecordDraftController extends ChangeNotifier {
                 accuracyM: location.accuracyM,
                 locationSource: location.source.apiValue,
                 displayOrder: index + 1,
+                recordPreparation: includeRecordDraft
+                    ? RecordPreparationPayload(
+                        requestId: _beginRequestId!,
+                        buildingMode:
+                            _buildingMode == RecordBuildingMode.newBuilding
+                            ? 'new'
+                            : 'existing',
+                        buildingId: _submissionBuildingId!,
+                        visitId: _submissionVisitId!,
+                        buildingName:
+                            _buildingMode == RecordBuildingMode.newBuilding
+                            ? _newBuildingName.trim()
+                            : null,
+                        designTagIds: _buildingTagIdsForSubmission(
+                          BuildingTagType.design,
+                        ),
+                        salesTagIds: _buildingTagIdsForSubmission(
+                          BuildingTagType.sales,
+                        ),
+                        constructionTagIds: _buildingTagIdsForSubmission(
+                          BuildingTagType.construction,
+                        ),
+                        visitedAt: _submissionVisitedAt!,
+                        triggerTagIds: _sortedIds(_selectedTriggerTagIds),
+                        impression: _impression.trim(),
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        accuracyM: location.accuracyM,
+                        locationSource: location.source.apiValue,
+                        expectedPhotoCount: _photos.length,
+                      )
+                    : null,
+                finalizeAfterUpload: finalizeAfterUpload,
               );
+
+          _submissionBuildingId =
+              uploadResult.buildingId ?? _submissionBuildingId;
+          _submissionVisitId = uploadResult.visitId ?? _submissionVisitId;
+          _beginRecordResult ??= BeginRecordResult(
+            buildingId: _submissionBuildingId!,
+            visitId: _submissionVisitId!,
+            expectedPhotoCount: _photos.length,
+            buildingCreated: uploadResult.buildingCreated,
+            visitCreated: uploadResult.visitCreated,
+            reused: uploadResult.reused,
+          );
           _photoUploadResults[photo.photoId] = uploadResult;
           _photoUploadStatuses[photo.photoId] =
               RecordPhotoUploadStatus.uploaded;
+
+          if (uploadResult.recordCompleted) {
+            _finalizeRecordResult = FinalizeRecordResult(
+              buildingId: _submissionBuildingId!,
+              visitId: _submissionVisitId!,
+              photoCount: uploadResult.photoCount ?? _photos.length,
+              status: 'completed',
+              reused: uploadResult.reused,
+            );
+          }
         } on RecordSubmissionApiException catch (error) {
           _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
           failedDetails.add('${photo.fileName}: ${error.message}');
@@ -709,6 +736,10 @@ class RecordDraftController extends ChangeNotifier {
           failedDetails.add('${photo.fileName}: 不明なエラー');
         }
         notifyListeners();
+
+        if (failedDetails.isNotEmpty) {
+          break;
+        }
       }
 
       _currentUploadingPhotoId = null;
@@ -720,16 +751,13 @@ class RecordDraftController extends ChangeNotifier {
         return;
       }
 
-      _submissionPhase = RecordSubmissionPhase.finalizing;
-      notifyListeners();
-
-      _finalizeRecordResult = await _recordSubmissionApiService.finalizeRecord(
-        requestId: _finalizeRequestId!,
-        clientVersion: AppConfig.version,
-        idToken: idToken,
-        buildingId: _submissionBuildingId!,
-        visitId: _submissionVisitId!,
-      );
+      if (_finalizeRecordResult == null) {
+        _submissionPhase = RecordSubmissionPhase.failed;
+        _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
+        _submissionErrorDetail = '記録を確定できませんでした。';
+        notifyListeners();
+        return;
+      }
 
       _submissionPhase = RecordSubmissionPhase.succeeded;
       _submissionNoticeMessage = '建物・訪問・写真${_photos.length}枚を保存しました。';
@@ -788,7 +816,6 @@ class RecordDraftController extends ChangeNotifier {
     _beginRecordResult = null;
     _finalizeRecordResult = null;
     _beginRequestId = null;
-    _finalizeRequestId = null;
     _submissionBuildingId = null;
     _submissionVisitId = null;
     _submissionVisitedAt = null;

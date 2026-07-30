@@ -69,6 +69,8 @@ function handleBeginRecord(requestId, payload, authContext) {
 
 /**
  * 写真を1枚ずつ非公開Driveへ保存し、Photosシートへ登録する。
+ * recordDraftを同梱した場合は建物・訪問の準備も同じ通信内で行い、
+ * finalizeAfterUploadがtrueなら写真保存後に記録を確定する。
  *
  * @param {string|null} requestId
  * @param {Object} payload
@@ -81,10 +83,12 @@ function handleUploadPhoto(requestId, payload, authContext) {
   var timings = {
     authenticationMs: Number(authContext.verificationMs) || 0,
     lockWaitMs: 0,
+    draftPreparationMs: 0,
     lookupMs: 0,
     base64DecodeMs: 0,
     driveSaveMs: 0,
-    sheetWriteMs: 0
+    sheetWriteMs: 0,
+    finalizeMs: 0
   };
   var normalized = normalizeUploadPhotoPayload_(requestId, payload);
 
@@ -138,6 +142,20 @@ function handleUploadPhoto(requestId, payload, authContext) {
       return createApiResponse(true, requestId, cached, null, null);
     }
 
+    var preparation = {
+      prepared: false,
+      buildingCreated: false,
+      visitCreated: false
+    };
+    if (normalized.recordDraft !== null) {
+      var preparationStartedAt = Date.now();
+      preparation = prepareRecordDraftForUpload_(
+        spreadsheet,
+        normalized.recordDraft
+      );
+      timings.draftPreparationMs = Date.now() - preparationStartedAt;
+    }
+
     var buildingRecord = requireActiveSheetRecord_(
       spreadsheet,
       'Buildings',
@@ -166,115 +184,106 @@ function handleUploadPhoto(requestId, payload, authContext) {
     );
     timings.lookupMs = Date.now() - lookupStartedAt;
 
+    var result;
     if (existingPhoto !== null) {
       validateExistingPhotoRecord_(existingPhoto, normalized);
-      var existingResult = photoResultFromSheetRecord_(
-        existingPhoto,
-        true
-      );
-      attachUploadPerformance_(
-        existingResult,
-        authContext,
-        timings,
-        handlerStartedAt
-      );
-
-      var existingWriteStartedAt = Date.now();
-      appendRequestResult_(
-        spreadsheet,
-        normalized.requestId,
-        'uploadPhoto',
-        existingResult,
-        {
-          buildingId: normalized.buildingId,
-          visitId: normalized.visitId,
-          photoId: normalized.photoId
-        },
-        true
-      );
-      timings.sheetWriteMs = Date.now() - existingWriteStartedAt;
-      attachUploadPerformance_(
-        existingResult,
-        authContext,
-        timings,
-        handlerStartedAt
-      );
-      return createApiResponse(
-        true,
-        requestId,
-        existingResult,
-        null,
-        null
-      );
-    }
-
-    var driveStartedAt = Date.now();
-    var buildingFolder = getRecordBuildingFolder_(
-      buildingRecord,
-      normalized.buildingId
-    );
-    var internalFileName = normalized.photoId
-      + RECORD_ALLOWED_MIME_TYPES[normalized.mimeType];
-    var files = buildingFolder.getFilesByName(internalFileName);
-    var file;
-    var reusedFile = false;
-
-    if (files.hasNext()) {
-      file = files.next();
-      reusedFile = true;
+      result = photoResultFromSheetRecord_(existingPhoto, true);
     } else {
-      file = buildingFolder.createFile(
-        Utilities.newBlob(
-          bytes,
-          normalized.mimeType,
-          internalFileName
-        )
+      var driveStartedAt = Date.now();
+      var buildingFolder = getRecordBuildingFolder_(
+        buildingRecord,
+        normalized.buildingId
       );
-      file.setDescription(
-        'Building record photo. photoId=' + normalized.photoId
-      );
+      var internalFileName = normalized.photoId
+        + RECORD_ALLOWED_MIME_TYPES[normalized.mimeType];
+      var files = buildingFolder.getFilesByName(internalFileName);
+      var file;
+      var reusedFile = false;
+
+      if (files.hasNext()) {
+        file = files.next();
+        reusedFile = true;
+      } else {
+        file = buildingFolder.createFile(
+          Utilities.newBlob(
+            bytes,
+            normalized.mimeType,
+            internalFileName
+          )
+        );
+        file.setDescription(
+          'Building record photo. photoId=' + normalized.photoId
+        );
+      }
+      timings.driveSaveMs = Date.now() - driveStartedAt;
+
+      var photoRow = [
+        normalized.photoId,
+        normalized.buildingId,
+        normalized.visitId,
+        'google_drive',
+        file.getId(),
+        '',
+        internalFileName,
+        normalized.mimeType,
+        bytes.length,
+        '',
+        '',
+        normalized.takenAt,
+        normalized.latitude,
+        normalized.longitude,
+        normalized.accuracyM === null ? '' : normalized.accuracyM,
+        normalized.locationSource,
+        normalized.displayOrder,
+        new Date(),
+        false
+      ];
+
+      var photoWriteStartedAt = Date.now();
+      appendSheetRow_(spreadsheet, 'Photos', photoRow);
+      timings.sheetWriteMs += Date.now() - photoWriteStartedAt;
+
+      result = {
+        photoId: normalized.photoId,
+        storageFileId: file.getId(),
+        byteSize: bytes.length,
+        displayOrder: normalized.displayOrder,
+        reused: reusedFile,
+        stage: '3-4B'
+      };
     }
-    timings.driveSaveMs = Date.now() - driveStartedAt;
 
-    var photoRow = [
-      normalized.photoId,
-      normalized.buildingId,
-      normalized.visitId,
-      'google_drive',
-      file.getId(),
-      '',
-      internalFileName,
-      normalized.mimeType,
-      bytes.length,
-      '',
-      '',
-      normalized.takenAt,
-      normalized.latitude,
-      normalized.longitude,
-      normalized.accuracyM === null ? '' : normalized.accuracyM,
-      normalized.locationSource,
-      normalized.displayOrder,
-      new Date(),
-      false
-    ];
+    result.buildingId = normalized.buildingId;
+    result.visitId = normalized.visitId;
+    result.recordPrepared = preparation.prepared;
+    result.buildingCreated = preparation.buildingCreated;
+    result.visitCreated = preparation.visitCreated;
+    result.recordCompleted = false;
+    result.photoCount = null;
+    result.saveMode = 'combined_photo_step';
 
-    var result = {
-      photoId: normalized.photoId,
-      storageFileId: file.getId(),
-      byteSize: bytes.length,
-      displayOrder: normalized.displayOrder,
-      reused: reusedFile,
-      stage: '3-4B'
-    };
+    if (normalized.finalizeAfterUpload) {
+      var finalizeStartedAt = Date.now();
+      var finalizeResult = finalizeRecordInsideUpload_(
+        spreadsheet,
+        normalized,
+        buildingRecord,
+        visitRecord
+      );
+      timings.finalizeMs = Date.now() - finalizeStartedAt;
+      result.recordCompleted = true;
+      result.photoCount = finalizeResult.photoCount;
+      result.recordFinalizeReused = finalizeResult.reused;
+    }
 
-    var sheetWriteStartedAt = Date.now();
-    appendSheetRow_(spreadsheet, 'Photos', photoRow);
     attachUploadPerformance_(
       result,
       authContext,
       timings,
       handlerStartedAt
     );
+
+    var requestWriteStartedAt = Date.now();
     appendRequestResult_(
       spreadsheet,
       normalized.requestId,
@@ -287,7 +296,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
       },
       true
     );
-    timings.sheetWriteMs = Date.now() - sheetWriteStartedAt;
+    timings.sheetWriteMs += Date.now() - requestWriteStartedAt;
     attachUploadPerformance_(
       result,
       authContext,
@@ -299,6 +308,100 @@ function handleUploadPhoto(requestId, payload, authContext) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function prepareRecordDraftForUpload_(spreadsheet, recordDraft) {
+  validateRecordTagIds_(spreadsheet, recordDraft);
+  var buildingResult = ensureRecordBuilding_(spreadsheet, recordDraft);
+  var visitResult = ensureRecordVisit_(spreadsheet, recordDraft);
+  return {
+    prepared: true,
+    buildingCreated: buildingResult.created,
+    visitCreated: visitResult.created
+  };
+}
+
+function finalizeRecordInsideUpload_(
+  spreadsheet,
+  normalized,
+  buildingRecord,
+  visitRecord
+) {
+  if (String(visitRecord.object.buildingId) !== normalized.buildingId) {
+    throw createApiError_(
+      'CONFLICT',
+      '訪問記録と建物が一致しません。'
+    );
+  }
+
+  var expectedPhotoCount = Number(visitRecord.object.expectedPhotoCount);
+  var photos;
+  if (expectedPhotoCount === 1) {
+    var currentPhoto = requireActiveSheetRecord_(
+      spreadsheet,
+      'Photos',
+      'photoId',
+      normalized.photoId
+    );
+    photos = [currentPhoto];
+  } else {
+    photos = readSheetRecordsByField_(
+      spreadsheet,
+      'Photos',
+      'visitId',
+      normalized.visitId
+    ).filter(function(record) {
+      return !sheetBoolean_(record.object.isDeleted);
+    });
+  }
+
+  if (photos.length !== expectedPhotoCount) {
+    throw createApiError_(
+      'CONFLICT',
+      '写真の保存枚数が予定枚数と一致しません。'
+    );
+  }
+
+  var alreadyCompleted = String(visitRecord.object.status) === 'completed';
+  if (!alreadyCompleted) {
+    var visitValues = visitRecord.values.slice();
+    visitValues[9] = 'completed';
+    visitValues[12] = new Date();
+    updateSheetRecord_(
+      spreadsheet,
+      'Visits',
+      visitRecord.rowNumber,
+      visitValues
+    );
+  }
+
+  var buildingValues = buildingRecord.values.slice();
+  var buildingChanged = false;
+  if (isBlankSheetCell_(buildingValues[10]) && photos.length > 0) {
+    photos.sort(function(left, right) {
+      return Number(left.object.displayOrder)
+        - Number(right.object.displayOrder);
+    });
+    buildingValues[10] = String(photos[0].object.photoId);
+    buildingChanged = true;
+  }
+  if (buildingChanged) {
+    buildingValues[12] = new Date();
+    updateSheetRecord_(
+      spreadsheet,
+      'Buildings',
+      buildingRecord.rowNumber,
+      buildingValues
+    );
+  }
+
+  return {
+    buildingId: normalized.buildingId,
+    visitId: normalized.visitId,
+    photoCount: photos.length,
+    status: 'completed',
+    reused: alreadyCompleted
+  };
 }
 
 function attachUploadPerformance_(
@@ -313,10 +416,12 @@ function attachUploadPerformance_(
     ) || 'tokeninfo',
     authenticationMs: Number(timings.authenticationMs) || 0,
     lockWaitMs: Number(timings.lockWaitMs) || 0,
+    draftPreparationMs: Number(timings.draftPreparationMs) || 0,
     lookupMs: Number(timings.lookupMs) || 0,
     base64DecodeMs: Number(timings.base64DecodeMs) || 0,
     driveSaveMs: Number(timings.driveSaveMs) || 0,
     sheetWriteMs: Number(timings.sheetWriteMs) || 0,
+    finalizeMs: Number(timings.finalizeMs) || 0,
     handlerTotalMs: Date.now() - handlerStartedAt
   };
 }
@@ -471,8 +576,8 @@ function normalizeBeginRecordPayload_(requestId, payload) {
   return {
     requestId: requireRecordRequestId_(requestId),
     buildingMode: buildingMode,
-    buildingId: requireRecordId_(safe.buildingId, 'buildingId'),
-    visitId: requireRecordId_(safe.visitId, 'visitId'),
+    buildingId: buildingId,
+    visitId: visitId,
     buildingName: buildingName,
     designTagIds: requireStringArray_(safe.designTagIds, 'designTagIds'),
     salesTagIds: requireStringArray_(safe.salesTagIds, 'salesTagIds'),
@@ -512,6 +617,44 @@ function normalizeUploadPhotoPayload_(requestId, payload) {
     );
   }
 
+  var buildingId = requireRecordId_(safe.buildingId, 'buildingId');
+  var visitId = requireRecordId_(safe.visitId, 'visitId');
+  var recordDraft = null;
+  if (safe.recordDraft !== null && safe.recordDraft !== undefined) {
+    if (
+      typeof safe.recordDraft !== 'object' ||
+      Array.isArray(safe.recordDraft)
+    ) {
+      throw createApiError_(
+        'VALIDATION_ERROR',
+        'recordDraftがJSONオブジェクトではありません。'
+      );
+    }
+    recordDraft = normalizeBeginRecordPayload_(
+      safe.recordDraft.requestId,
+      safe.recordDraft
+    );
+    if (
+      recordDraft.buildingId !== buildingId ||
+      recordDraft.visitId !== visitId
+    ) {
+      throw createApiError_(
+        'CONFLICT',
+        'recordDraftと写真の建物・訪問IDが一致しません。'
+      );
+    }
+  }
+
+  if (
+    safe.finalizeAfterUpload !== undefined &&
+    typeof safe.finalizeAfterUpload !== 'boolean'
+  ) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      'finalizeAfterUploadが真偽値ではありません。'
+    );
+  }
+
   return {
     requestId: requireRecordRequestId_(requestId),
     buildingId: requireRecordId_(safe.buildingId, 'buildingId'),
@@ -529,7 +672,9 @@ function normalizeUploadPhotoPayload_(requestId, payload) {
     displayOrder: requirePositiveInteger_(
       safe.displayOrder,
       'displayOrder'
-    )
+    ),
+    recordDraft: recordDraft,
+    finalizeAfterUpload: safe.finalizeAfterUpload === true
   };
 }
 
@@ -1140,140 +1285,84 @@ function testRecordFlow() {
   var buildingId = 'test-building-' + suffix;
   var visitId = 'test-visit-' + suffix;
   var photoId = 'test-photo-' + suffix;
-  var beginRequestId = 'test-begin-' + suffix;
+  var recordRequestId = 'test-record-' + suffix;
   var uploadRequestId = 'test-upload-' + suffix;
-  var finalizeRequestId = 'test-finalize-' + suffix;
   var authContext = {
     subject: 'apps-script-editor-test',
     email: 'editor-test@example.com'
   };
+  var onePixelPng =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  var uploadPayload = {
+    buildingId: buildingId,
+    visitId: visitId,
+    photoId: photoId,
+    fileName: 'test.png',
+    mimeType: 'image/png',
+    byteSize: Utilities.base64Decode(onePixelPng).length,
+    base64Data: onePixelPng,
+    takenAt: new Date().toISOString(),
+    latitude: 35.681236,
+    longitude: 139.767125,
+    accuracyM: 10,
+    locationSource: 'gps',
+    displayOrder: 1,
+    finalizeAfterUpload: true,
+    recordDraft: {
+      requestId: recordRequestId,
+      buildingMode: 'new',
+      buildingId: buildingId,
+      visitId: visitId,
+      buildingName: 'API高速保存テスト建物',
+      designTagIds: [],
+      salesTagIds: [],
+      constructionTagIds: [],
+      visitedAt: new Date().toISOString(),
+      triggerTagIds: [],
+      impression: 'API高速保存テスト',
+      latitude: 35.681236,
+      longitude: 139.767125,
+      accuracyM: 10,
+      locationSource: 'gps',
+      expectedPhotoCount: 1
+    }
+  };
 
   try {
-    var begin = handleBeginRecord(
-      beginRequestId,
-      {
-        buildingMode: 'new',
-        buildingId: buildingId,
-        visitId: visitId,
-        buildingName: 'API保存テスト建物',
-        designTagIds: [],
-        salesTagIds: [],
-        constructionTagIds: [],
-        visitedAt: new Date().toISOString(),
-        triggerTagIds: [],
-        impression: 'API保存テスト',
-        latitude: 35.681236,
-        longitude: 139.767125,
-        accuracyM: 10,
-        locationSource: 'gps',
-        expectedPhotoCount: 1
-      },
-      authContext
-    );
-
-    var onePixelPng =
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-    var upload = handleUploadPhoto(
+    var save = handleUploadPhoto(
       uploadRequestId,
-      {
-        buildingId: buildingId,
-        visitId: visitId,
-        photoId: photoId,
-        fileName: 'test.png',
-        mimeType: 'image/png',
-        byteSize: Utilities.base64Decode(onePixelPng).length,
-        base64Data: onePixelPng,
-        takenAt: new Date().toISOString(),
-        latitude: 35.681236,
-        longitude: 139.767125,
-        accuracyM: 10,
-        locationSource: 'gps',
-        displayOrder: 1
-      },
+      uploadPayload,
       authContext
     );
-
-    var finalize = handleFinalizeRecord(
-      finalizeRequestId,
-      {
-        buildingId: buildingId,
-        visitId: visitId
-      },
-      authContext
-    );
-
-    var beginRetry = handleBeginRecord(
-      beginRequestId,
-      {
-        buildingMode: 'new',
-        buildingId: buildingId,
-        visitId: visitId,
-        buildingName: 'API保存テスト建物',
-        designTagIds: [],
-        salesTagIds: [],
-        constructionTagIds: [],
-        visitedAt: new Date().toISOString(),
-        triggerTagIds: [],
-        impression: 'API保存テスト',
-        latitude: 35.681236,
-        longitude: 139.767125,
-        accuracyM: 10,
-        locationSource: 'gps',
-        expectedPhotoCount: 1
-      },
-      authContext
-    );
-    var uploadRetry = handleUploadPhoto(
+    var retry = handleUploadPhoto(
       uploadRequestId,
-      {
-        buildingId: buildingId,
-        visitId: visitId,
-        photoId: photoId,
-        fileName: 'test.png',
-        mimeType: 'image/png',
-        byteSize: Utilities.base64Decode(onePixelPng).length,
-        base64Data: onePixelPng,
-        takenAt: new Date().toISOString(),
-        latitude: 35.681236,
-        longitude: 139.767125,
-        accuracyM: 10,
-        locationSource: 'gps',
-        displayOrder: 1
-      },
+      uploadPayload,
       authContext
     );
-    var finalizeRetry = handleFinalizeRecord(
-      finalizeRequestId,
-      {
-        buildingId: buildingId,
-        visitId: visitId
-      },
-      authContext
-    );
+    var saveData = JSON.parse(save.getContent()).data;
+    var retryData = JSON.parse(retry.getContent()).data;
 
-    var retryResults = [beginRetry, uploadRetry, finalizeRetry]
-      .map(function(response) {
-        return JSON.parse(response.getContent()).data;
-      });
-    retryResults.forEach(function(result) {
-      if (!result || result.reused !== true) {
-        throw createApiError_(
-          'INTERNAL_ERROR',
-          '同じrequestIdの再送結果を再利用できませんでした。'
-        );
-      }
-    });
+    if (!saveData || saveData.recordCompleted !== true) {
+      throw createApiError_(
+        'INTERNAL_ERROR',
+        '1回の通信で記録を確定できませんでした。'
+      );
+    }
+    if (!retryData || retryData.reused !== true) {
+      throw createApiError_(
+        'INTERNAL_ERROR',
+        '同じrequestIdの再送結果を再利用できませんでした。'
+      );
+    }
 
-    console.log('begin: ' + begin.getContent());
-    console.log('upload: ' + upload.getContent());
-    console.log('finalize: ' + finalize.getContent());
-    console.log('retry: ' + JSON.stringify(retryResults));
+    console.log('fastSave: ' + save.getContent());
+    console.log('retry: ' + retry.getContent());
   } finally {
     cleanupRecordFlowTest_(
       buildingId,
       visitId,
       photoId,
-      [beginRequestId, uploadRequestId, finalizeRequestId]
+      [uploadRequestId]
     );
   }
 }

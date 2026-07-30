@@ -606,12 +606,17 @@ class _UploadPerformanceDetails extends StatelessWidget {
                 '認証 ${_authenticationModeLabel(performance.authenticationMode!)}',
               if (performance.authenticationMs != null)
                 '認証処理 ${_formatMilliseconds(performance.authenticationMs!)}',
+              if (performance.draftPreparationMs != null &&
+                  performance.draftPreparationMs! > 0)
+                '準備 ${_formatMilliseconds(performance.draftPreparationMs!)}',
               if (performance.lookupMs != null)
                 '検索 ${_formatMilliseconds(performance.lookupMs!)}',
               if (performance.driveSaveMs != null)
                 'Drive ${_formatMilliseconds(performance.driveSaveMs!)}',
               if (performance.sheetWriteMs != null)
                 'Sheets ${_formatMilliseconds(performance.sheetWriteMs!)}',
+              if (performance.finalizeMs != null && performance.finalizeMs! > 0)
+                '確定 ${_formatMilliseconds(performance.finalizeMs!)}',
               if (performance.handlerTotalMs != null)
                 'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
             ];
