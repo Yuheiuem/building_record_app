@@ -253,8 +253,8 @@ function handleUploadPhoto(requestId, payload, authContext) {
       };
     }
 
-    result.buildingId = normalized.buildingId;
-    result.visitId = normalized.visitId;
+    buildingId: requireRecordId_(safe.buildingId, 'buildingId'),
+    visitId: requireRecordId_(safe.visitId, 'visitId'),
     result.recordPrepared = preparation.prepared;
     result.buildingCreated = preparation.buildingCreated;
     result.visitCreated = preparation.visitCreated;
