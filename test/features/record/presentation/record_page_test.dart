@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:building_record_app/core/config/app_config.dart';
 import 'package:building_record_app/data/models/bootstrap_data.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
@@ -15,7 +16,6 @@ import 'package:building_record_app/data/services/tag_api_service.dart';
 import 'package:building_record_app/features/record/presentation/record_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:building_record_app/core/config/app_config.dart';
 
 void main() {
   testWidgets('初期状態では写真・建物・訪問の入力欄を表示する', (WidgetTester tester) async {
