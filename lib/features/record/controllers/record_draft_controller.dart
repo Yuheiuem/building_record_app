@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
@@ -44,7 +45,9 @@ class RecordDraftController extends ChangeNotifier {
        _authService = authService,
        _locationService = locationService,
        _tagApiService = tagApiService,
-       _recordSubmissionApiService = recordSubmissionApiService;
+       _recordSubmissionApiService = recordSubmissionApiService {
+    _authService.addListener(_handleAuthServiceChanged);
+  }
 
   final RecordImagePickerService _imagePickerService;
   final BootstrapApiService _bootstrapApiService;
@@ -72,6 +75,9 @@ class RecordDraftController extends ChangeNotifier {
   bool _isLoadingBootstrap = false;
   bool _hasLoadedBootstrap = false;
   String? _bootstrapErrorMessage;
+  bool _requiresReauthentication = false;
+  bool _isRefreshingAuthentication = false;
+  String? _authenticationFailureToken;
 
   RecordBuildingMode _buildingMode = RecordBuildingMode.newBuilding;
   String _newBuildingName = '';
@@ -118,6 +124,8 @@ class RecordDraftController extends ChangeNotifier {
   bool get isLoadingBootstrap => _isLoadingBootstrap;
   bool get hasLoadedBootstrap => _hasLoadedBootstrap;
   String? get bootstrapErrorMessage => _bootstrapErrorMessage;
+  bool get requiresReauthentication => _requiresReauthentication;
+  bool get isRefreshingAuthentication => _isRefreshingAuthentication;
   UnmodifiableListView<Building> get buildings =>
       UnmodifiableListView<Building>(_buildings);
   UnmodifiableListView<BuildingTag> get tags =>
@@ -152,7 +160,8 @@ class RecordDraftController extends ChangeNotifier {
       _submissionPhase == RecordSubmissionPhase.uploading ||
       _submissionPhase == RecordSubmissionPhase.finalizing;
   bool get isDraftLocked => _beginRequestId != null;
-  bool get canSubmitRecord => !isSubmitting && !submissionSucceeded;
+  bool get canSubmitRecord =>
+      !isSubmitting && !submissionSucceeded && !_requiresReauthentication;
   int get uploadedPhotoCount =>
       _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
         return status == RecordPhotoUploadStatus.uploaded;
@@ -262,6 +271,7 @@ class RecordDraftController extends ChangeNotifier {
     _bootstrapErrorMessage = null;
     notifyListeners();
 
+    bool shouldRefreshAuthentication = false;
     try {
       final BootstrapData data = await _bootstrapApiService.getBootstrapData(
         requestId: const Uuid().v4(),
@@ -296,14 +306,61 @@ class RecordDraftController extends ChangeNotifier {
       _removeUnavailableTagIds(_pendingExistingSalesTagIds);
       _removeUnavailableTagIds(_pendingExistingConstructionTagIds);
       _hasLoadedBootstrap = true;
+      _requiresReauthentication = false;
+      _authenticationFailureToken = null;
     } on BootstrapApiException catch (error) {
-      _bootstrapErrorMessage = error.message;
+      if (_isAuthenticationRequired(error.errorCode)) {
+        _markAuthenticationRequired(idToken);
+        _bootstrapErrorMessage = 'IDトークンが無効または期限切れです。入力内容を残したまま認証を更新します。';
+        shouldRefreshAuthentication = true;
+      } else {
+        _bootstrapErrorMessage = error.message;
+      }
     } catch (_) {
       _bootstrapErrorMessage = '建物とタグのデータを取得できませんでした。';
     } finally {
       _isLoadingBootstrap = false;
       notifyListeners();
     }
+
+    if (shouldRefreshAuthentication) {
+      await refreshAuthentication();
+    }
+  }
+
+  Future<void> refreshAuthentication() async {
+    if (_isRefreshingAuthentication) {
+      return;
+    }
+
+    _isRefreshingAuthentication = true;
+    notifyListeners();
+
+    final bool refreshed = await _authService.refreshIdToken();
+    _isRefreshingAuthentication = false;
+
+    if (!_requiresReauthentication) {
+      notifyListeners();
+      return;
+    }
+
+    final String? currentToken = _authService.idToken;
+    final bool hasFreshToken =
+        refreshed &&
+        currentToken != null &&
+        currentToken.isNotEmpty &&
+        currentToken != _authenticationFailureToken;
+
+    if (!hasFreshToken) {
+      _bootstrapErrorMessage =
+          '認証を自動更新できませんでした。下のGoogleログインボタンから再ログインしてください。入力内容は保持されています。';
+      notifyListeners();
+      return;
+    }
+
+    _completeReauthentication();
+    notifyListeners();
+    await loadBootstrapData();
   }
 
   Future<void> addPhotos() async {
@@ -571,6 +628,13 @@ class RecordDraftController extends ChangeNotifier {
       }
       return null;
     } on TagApiException catch (error) {
+      if (_isAuthenticationRequired(error.errorCode)) {
+        _markAuthenticationRequired(idToken);
+        const String message =
+            'Googleログインの有効期限が切れました。認証を更新してから、もう一度タグを追加してください。';
+        _errorMessage = message;
+        return message;
+      }
       _errorMessage = error.message;
       return error.message;
     } catch (_) {
@@ -584,7 +648,7 @@ class RecordDraftController extends ChangeNotifier {
   }
 
   Future<void> submitRecord() async {
-    if (isSubmitting || submissionSucceeded) {
+    if (isSubmitting || submissionSucceeded || _requiresReauthentication) {
       return;
     }
 
@@ -730,6 +794,9 @@ class RecordDraftController extends ChangeNotifier {
           }
         } on RecordSubmissionApiException catch (error) {
           _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
+          if (_isAuthenticationRequired(error.errorCode)) {
+            _markAuthenticationRequired(idToken);
+          }
           failedDetails.add('${photo.fileName}: ${error.message}');
         } catch (_) {
           _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
@@ -745,8 +812,13 @@ class RecordDraftController extends ChangeNotifier {
       _currentUploadingPhotoId = null;
       if (failedDetails.isNotEmpty) {
         _submissionPhase = RecordSubmissionPhase.failed;
-        _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
-        _submissionErrorDetail = failedDetails.join('\n');
+        if (_requiresReauthentication) {
+          _submissionErrorMessage = 'ログインの有効期限が切れました。';
+          _submissionErrorDetail = '入力内容と送信済み写真は保持されています。認証更新後にもう一度保存してください。';
+        } else {
+          _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
+          _submissionErrorDetail = failedDetails.join('\n');
+        }
         notifyListeners();
         return;
       }
@@ -768,8 +840,14 @@ class RecordDraftController extends ChangeNotifier {
     } on RecordSubmissionApiException catch (error) {
       _submissionPhase = RecordSubmissionPhase.failed;
       _currentUploadingPhotoId = null;
-      _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
-      _submissionErrorDetail = error.message;
+      if (_isAuthenticationRequired(error.errorCode)) {
+        _markAuthenticationRequired(idToken);
+        _submissionErrorMessage = 'ログインの有効期限が切れました。';
+        _submissionErrorDetail = '入力内容と送信済み写真は保持されています。認証更新後にもう一度保存してください。';
+      } else {
+        _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
+        _submissionErrorDetail = error.message;
+      }
       notifyListeners();
     } catch (_) {
       _submissionPhase = RecordSubmissionPhase.failed;
@@ -807,6 +885,8 @@ class RecordDraftController extends ChangeNotifier {
     _visitLocation = null;
     _locationErrorMessage = null;
     _locationNoticeMessage = null;
+    _requiresReauthentication = false;
+    _authenticationFailureToken = null;
     _errorMessage = null;
     _noticeMessage = null;
     _submissionPhase = RecordSubmissionPhase.idle;
@@ -894,6 +974,26 @@ class RecordDraftController extends ChangeNotifier {
     }
   }
 
+  void useManualLocation({
+    required double latitude,
+    required double longitude,
+  }) {
+    if (isDraftLocked) {
+      return;
+    }
+
+    _visitLocation = RecordDraftLocation(
+      latitude: latitude,
+      longitude: longitude,
+      accuracyM: null,
+      source: RecordLocationSource.manual,
+      capturedAt: DateTime.now(),
+    );
+    _locationErrorMessage = null;
+    _locationNoticeMessage = '地図で指定した位置を使用します。';
+    notifyListeners();
+  }
+
   void useSelectedBuildingLocation() {
     if (isDraftLocked) {
       return;
@@ -939,6 +1039,42 @@ class RecordDraftController extends ChangeNotifier {
     if (notify) {
       notifyListeners();
     }
+  }
+
+  void _handleAuthServiceChanged() {
+    if (!_requiresReauthentication) {
+      return;
+    }
+
+    final String? currentToken = _authService.idToken;
+    if (currentToken == null ||
+        currentToken.isEmpty ||
+        currentToken == _authenticationFailureToken) {
+      return;
+    }
+
+    _completeReauthentication();
+    notifyListeners();
+    unawaited(loadBootstrapData());
+  }
+
+  void _markAuthenticationRequired(String failedToken) {
+    _requiresReauthentication = true;
+    _authenticationFailureToken = failedToken;
+  }
+
+  void _completeReauthentication() {
+    _requiresReauthentication = false;
+    _authenticationFailureToken = null;
+    _bootstrapErrorMessage = null;
+    if (_submissionPhase == RecordSubmissionPhase.failed &&
+        _submissionErrorMessage == 'ログインの有効期限が切れました。') {
+      _submissionErrorDetail = '認証を更新しました。もう一度「記録を保存」を押してください。';
+    }
+  }
+
+  bool _isAuthenticationRequired(String? errorCode) {
+    return errorCode == 'AUTH_REQUIRED';
   }
 
   void _upsertTag(BuildingTag tag) {
@@ -1021,6 +1157,12 @@ class RecordDraftController extends ChangeNotifier {
         .map((BuildingTag tag) => tag.tagId)
         .toSet();
     selectedIds.removeWhere((String tagId) => !availableIds.contains(tagId));
+  }
+
+  @override
+  void dispose() {
+    _authService.removeListener(_handleAuthServiceChanged);
+    super.dispose();
   }
 }
 

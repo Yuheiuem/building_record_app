@@ -14,11 +14,10 @@ void main() {
       sentBody = jsonDecode(request.body) as Map<String, dynamic>;
       return _jsonResponse(_detailResponse());
     });
-    final HttpBuildingDetailApiService service =
-        HttpBuildingDetailApiService(
-          client: client,
-          endpoint: Uri.parse('https://example.com/exec'),
-        );
+    final HttpBuildingDetailApiService service = HttpBuildingDetailApiService(
+      client: client,
+      endpoint: Uri.parse('https://example.com/exec'),
+    );
 
     final BuildingDetailData result = await service.getBuildingDetail(
       requestId: 'request-detail',
@@ -61,11 +60,10 @@ void main() {
         'message': null,
       });
     });
-    final HttpBuildingDetailApiService service =
-        HttpBuildingDetailApiService(
-          client: client,
-          endpoint: Uri.parse('https://example.com/exec'),
-        );
+    final HttpBuildingDetailApiService service = HttpBuildingDetailApiService(
+      client: client,
+      endpoint: Uri.parse('https://example.com/exec'),
+    );
 
     final BuildingPhotoData result = await service.getPhotoData(
       requestId: 'request-photo',
@@ -95,11 +93,10 @@ void main() {
         'message': '建物が見つかりませんでした。',
       });
     });
-    final HttpBuildingDetailApiService service =
-        HttpBuildingDetailApiService(
-          client: client,
-          endpoint: Uri.parse('https://example.com/exec'),
-        );
+    final HttpBuildingDetailApiService service = HttpBuildingDetailApiService(
+      client: client,
+      endpoint: Uri.parse('https://example.com/exec'),
+    );
 
     await expectLater(
       service.getBuildingDetail(

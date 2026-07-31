@@ -20,23 +20,21 @@ void main() {
   });
 
   test('認証付き写真のBase64をバイト列へ変換できる', () {
-    final BuildingPhotoData data = BuildingPhotoData.fromJson(
-      <String, dynamic>{
-        'ok': true,
-        'requestId': 'request-photo',
-        'serverTime': '2026-07-30T15:30:00+09:00',
-        'data': <String, dynamic>{
-          'photoId': 'photo-12345678',
-          'fileName': 'photo-12345678.jpg',
-          'mimeType': 'image/jpeg',
-          'byteSize': 3,
-          'base64Data': 'AQID',
-          'stage': '4-2',
-        },
-        'errorCode': null,
-        'message': null,
+    final BuildingPhotoData data = BuildingPhotoData.fromJson(<String, dynamic>{
+      'ok': true,
+      'requestId': 'request-photo',
+      'serverTime': '2026-07-30T15:30:00+09:00',
+      'data': <String, dynamic>{
+        'photoId': 'photo-12345678',
+        'fileName': 'photo-12345678.jpg',
+        'mimeType': 'image/jpeg',
+        'byteSize': 3,
+        'base64Data': 'AQID',
+        'stage': '4-2',
       },
-    );
+      'errorCode': null,
+      'message': null,
+    });
 
     expect(data.photoId, 'photo-12345678');
     expect(data.bytes, <int>[1, 2, 3]);

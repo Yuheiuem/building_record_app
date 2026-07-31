@@ -21,12 +21,16 @@ abstract class AuthService extends ChangeNotifier {
   AuthenticatedGoogleUser? get currentUser;
 
   String? get idToken;
-
   String? get errorMessage;
 
   bool get hasIdToken => idToken?.isNotEmpty ?? false;
 
   Future<void> initialize();
+
+  /// 既存のGoogleログイン状態を利用して、IDトークンの再取得を試みる。
+  ///
+  /// テスト用の簡易AuthServiceは実装を追加しなくてもよいよう、既定ではfalseを返す。
+  Future<bool> refreshIdToken() async => false;
 
   Future<void> signOut();
 }

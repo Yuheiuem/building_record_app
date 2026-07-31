@@ -8,9 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('建物を地図範囲の一覧へ表示し検索と再取得ができる', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('建物を地図範囲の一覧へ表示し検索と再取得ができる', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 900);
     addTearDown(tester.view.reset);

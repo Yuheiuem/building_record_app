@@ -49,7 +49,6 @@ class GoogleAuthService extends AuthService {
       _status = GoogleAuthStatus.signedOut;
       _errorMessage = null;
       notifyListeners();
-
       _googleSignIn.attemptLightweightAuthentication();
     } on Object catch (error) {
       _setAuthenticationError(error);
@@ -66,20 +65,44 @@ class GoogleAuthService extends AuthService {
       _setSignedOut();
       return;
     }
-
-    _currentUser = AuthenticatedGoogleUser(
-      email: account.email,
-      displayName: account.displayName,
-      photoUrl: account.photoUrl,
-    );
-    _idToken = account.authentication.idToken;
-    _errorMessage = null;
-    _status = GoogleAuthStatus.signedIn;
-    notifyListeners();
+    _setSignedIn(account);
   }
 
   void _handleAuthenticationError(Object error) {
     _setAuthenticationError(error);
+  }
+
+  @override
+  Future<bool> refreshIdToken() async {
+    await initialize();
+
+    final String? previousToken = _idToken;
+    try {
+      final Future<GoogleSignInAccount?>? attempt = _googleSignIn
+          .attemptLightweightAuthentication(reportAllExceptions: true);
+      if (attempt == null) {
+        return false;
+      }
+
+      final GoogleSignInAccount? account = await attempt;
+      final String? refreshedToken = account?.authentication.idToken;
+      if (account == null ||
+          refreshedToken == null ||
+          refreshedToken.isEmpty ||
+          refreshedToken == previousToken) {
+        return false;
+      }
+
+      _setSignedIn(account);
+      return true;
+    } on Object catch (error) {
+      _errorMessage = _messageFromError(
+        error,
+        fallback: 'Googleログイン情報を更新できませんでした。',
+      );
+      notifyListeners();
+      return false;
+    }
   }
 
   @override
@@ -94,6 +117,18 @@ class GoogleAuthService extends AuthService {
       );
       notifyListeners();
     }
+  }
+
+  void _setSignedIn(GoogleSignInAccount account) {
+    _currentUser = AuthenticatedGoogleUser(
+      email: account.email,
+      displayName: account.displayName,
+      photoUrl: account.photoUrl,
+    );
+    _idToken = account.authentication.idToken;
+    _errorMessage = null;
+    _status = GoogleAuthStatus.signedIn;
+    notifyListeners();
   }
 
   void _setSignedOut() {
@@ -119,7 +154,6 @@ class GoogleAuthService extends AuthService {
     if (error is! GoogleSignInException) {
       return fallback;
     }
-
     return switch (error.code) {
       GoogleSignInExceptionCode.canceled => 'Googleログインがキャンセルされました。',
       GoogleSignInExceptionCode.interrupted =>

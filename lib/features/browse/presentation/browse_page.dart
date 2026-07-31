@@ -144,9 +144,7 @@ class _BrowsePageState extends State<BrowsePage> {
   }
 
   List<Building> get _allCoordinateBuildings {
-    return coordinateBuildings(
-      _bootstrapData?.buildings ?? const <Building>[],
-    );
+    return coordinateBuildings(_bootstrapData?.buildings ?? const <Building>[]);
   }
 
   List<Building> get _visibleBuildings {
@@ -325,9 +323,7 @@ class _BrowseToolbar extends StatelessWidget {
                                 ? 'Google Sheetsから建物を取得します。'
                                 : '地図を動かすと、右の一覧を表示範囲に合わせて更新します。',
                             style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
                           ),
                         ],
                       ),
@@ -378,10 +374,7 @@ class _BrowseToolbar extends StatelessWidget {
               children: <Widget>[
                 _BrowseCountChip(label: '地図表示範囲', count: visibleCount),
                 _BrowseCountChip(label: '座標あり', count: coordinateCount),
-                _BrowseCountChip(
-                  label: '座標なし',
-                  count: missingCoordinateCount,
-                ),
+                _BrowseCountChip(label: '座標なし', count: missingCoordinateCount),
                 if (data != null)
                   _BrowseCountChip(label: '全建物', count: data!.counts.buildings),
               ],
@@ -536,8 +529,8 @@ class _BuildingMapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool showLabels = visibleBounds != null &&
-        shouldShowBuildingLabels(visibleBounds!);
+    final bool showLabels =
+        visibleBounds != null && shouldShowBuildingLabels(visibleBounds!);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -636,7 +629,9 @@ class _BuildingMap extends StatelessWidget {
               LatLng(building.latitude!, building.longitude!),
         )
         .toList(growable: false);
-    final LatLng initialCenter = points.isEmpty ? _fallbackCenter : points.first;
+    final LatLng initialCenter = points.isEmpty
+        ? _fallbackCenter
+        : points.first;
     final CameraFit? initialCameraFit = points.length >= 2
         ? CameraFit.coordinates(
             coordinates: points,
@@ -684,9 +679,9 @@ class _BuildingMap extends StatelessWidget {
           child: IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withValues(
-                  alpha: 0.88,
-                ),
+                color: Theme.of(
+                  context,
+                ).colorScheme.surface.withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Padding(
@@ -710,9 +705,7 @@ class _BuildingMap extends StatelessWidget {
       Icons.location_on,
       size: 34,
       color: colorScheme.primary,
-      shadows: const <Shadow>[
-        Shadow(color: Colors.white, blurRadius: 4),
-      ],
+      shadows: const <Shadow>[Shadow(color: Colors.white, blurRadius: 4)],
     );
 
     if (!showLabels) {
@@ -747,9 +740,9 @@ class _BuildingMap extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
             pin,
@@ -800,9 +793,7 @@ class _VisibleBuildingListCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: fillAvailableHeight
-            ? MainAxisSize.max
-            : MainAxisSize.min,
+        mainAxisSize: fillAvailableHeight ? MainAxisSize.max : MainAxisSize.min,
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
@@ -816,9 +807,8 @@ class _VisibleBuildingListCard extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         '表示範囲の建物',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       Text(
                         '北から順に表示しています。',
@@ -832,7 +822,10 @@ class _VisibleBuildingListCard extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          if (fillAvailableHeight) Expanded(child: listContent) else listContent,
+          if (fillAvailableHeight)
+            Expanded(child: listContent)
+          else
+            listContent,
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Text(
@@ -864,10 +857,7 @@ class _BuildingListEmptyState extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 10),
-          const Text(
-            '現在の地図範囲または検索条件に合う建物はありません。',
-            textAlign: TextAlign.center,
-          ),
+          const Text('現在の地図範囲または検索条件に合う建物はありません。', textAlign: TextAlign.center),
         ],
       ),
     );

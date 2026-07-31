@@ -14,7 +14,9 @@ import '../../../data/services/record_location_service.dart';
 import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
+import '../../auth/presentation/google_sign_in_button.dart';
 import '../controllers/record_draft_controller.dart';
+import 'map_location_picker_page.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({
@@ -157,6 +159,37 @@ class _RecordPageState extends State<RecordPage> {
     );
   }
 
+  Future<void> _showMapLocationPicker() async {
+    if (_controller.isDraftLocked) {
+      return;
+    }
+
+    final RecordDraftLocation? currentLocation = _controller.visitLocation;
+    final Building? selectedBuilding = _controller.selectedExistingBuilding;
+    final RecordDraftLocation? selectedLocation = await Navigator.of(context)
+        .push<RecordDraftLocation>(
+          MaterialPageRoute<RecordDraftLocation>(
+            builder: (BuildContext context) {
+              return MapLocationPickerPage(
+                initialLatitude:
+                    currentLocation?.latitude ?? selectedBuilding?.latitude,
+                initialLongitude:
+                    currentLocation?.longitude ?? selectedBuilding?.longitude,
+              );
+            },
+          ),
+        );
+
+    if (!mounted || selectedLocation == null) {
+      return;
+    }
+
+    _controller.useManualLocation(
+      latitude: selectedLocation.latitude,
+      longitude: selectedLocation.longitude,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -176,6 +209,10 @@ class _RecordPageState extends State<RecordPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
+                      if (_controller.requiresReauthentication) ...<Widget>[
+                        _ReauthenticationPanel(controller: _controller),
+                        const SizedBox(height: 20),
+                      ],
                       KeyedSubtree(
                         key: ValueKey<int>(_controller.draftRevision),
                         child: _DraftLock(
@@ -223,6 +260,7 @@ class _RecordPageState extends State<RecordPage> {
                               _VisitDraftSection(
                                 controller: _controller,
                                 onAddTag: _showAddTagInput,
+                                onPickMapLocation: _showMapLocationPicker,
                               ),
                             ],
                           ),
@@ -844,7 +882,9 @@ class _BuildingDraftSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            if (controller.isLoadingBootstrap)
+            if (controller.requiresReauthentication)
+              const _BootstrapAuthenticationPausedPanel()
+            else if (controller.isLoadingBootstrap)
               const _BootstrapLoadingPanel()
             else if (controller.bootstrapErrorMessage != null)
               _BootstrapErrorPanel(
@@ -867,6 +907,105 @@ class _BuildingDraftSection extends StatelessWidget {
               const _BootstrapLoadingPanel(),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ReauthenticationPanel extends StatelessWidget {
+  const _ReauthenticationPanel({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Card(
+      color: colors.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(Icons.lock_clock_outlined, color: colors.error),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        'Googleログインの有効期限が切れました',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: colors.onErrorContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '選択した写真・建物・タグ・感想・位置はこの画面に保持されています。認証を更新すると、候補データを読み直して作業を続けられます。',
+                        style: TextStyle(color: colors.onErrorContainer),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              key: const Key('refresh-record-authentication'),
+              onPressed: controller.isRefreshingAuthentication
+                  ? null
+                  : () {
+                      unawaited(controller.refreshAuthentication());
+                    },
+              icon: controller.isRefreshingAuthentication
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_outlined),
+              label: Text(
+                controller.isRefreshingAuthentication
+                    ? '認証を更新しています'
+                    : '認証をもう一度更新',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '上の操作で戻らない場合は、下のGoogleボタンから同じアカウントでログインしてください。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: colors.onErrorContainer),
+            ),
+            const SizedBox(height: 10),
+            Center(child: buildGoogleSignInButton()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BootstrapAuthenticationPausedPanel extends StatelessWidget {
+  const _BootstrapAuthenticationPausedPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Row(
+        children: <Widget>[
+          Icon(Icons.hourglass_top_outlined),
+          SizedBox(width: 8),
+          Expanded(child: Text('認証の更新後に、建物とタグの候補を自動で読み直します。')),
+        ],
       ),
     );
   }
@@ -1489,10 +1628,15 @@ class _ReadOnlyTagGroup extends StatelessWidget {
 }
 
 class _VisitDraftSection extends StatelessWidget {
-  const _VisitDraftSection({required this.controller, required this.onAddTag});
+  const _VisitDraftSection({
+    required this.controller,
+    required this.onAddTag,
+    required this.onPickMapLocation,
+  });
 
   final RecordDraftController controller;
   final ValueChanged<BuildingTagType> onAddTag;
+  final VoidCallback onPickMapLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -1552,7 +1696,10 @@ class _VisitDraftSection extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            _VisitLocationPanel(controller: controller),
+            _VisitLocationPanel(
+              controller: controller,
+              onPickMapLocation: onPickMapLocation,
+            ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
@@ -1581,9 +1728,13 @@ class _VisitDraftSection extends StatelessWidget {
 }
 
 class _VisitLocationPanel extends StatelessWidget {
-  const _VisitLocationPanel({required this.controller});
+  const _VisitLocationPanel({
+    required this.controller,
+    required this.onPickMapLocation,
+  });
 
   final RecordDraftController controller;
+  final VoidCallback onPickMapLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -1644,6 +1795,14 @@ class _VisitLocationPanel extends StatelessWidget {
                     : controller.acquireCurrentLocation,
                 icon: const Icon(Icons.gps_fixed_outlined),
                 label: Text(location == null ? '現在地を取得' : '現在地を再取得'),
+              ),
+              OutlinedButton.icon(
+                key: const Key('pick-location-on-map'),
+                onPressed: controller.isGettingLocation
+                    ? null
+                    : onPickMapLocation,
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('地図で位置を指定'),
               ),
               if (controller.canUseSelectedBuildingLocation)
                 OutlinedButton.icon(

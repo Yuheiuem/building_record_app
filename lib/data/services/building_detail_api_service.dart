@@ -51,9 +51,7 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
     try {
       return BuildingDetailData.fromJson(response);
     } on FormatException catch (error) {
-      throw BuildingDetailApiException(
-        '建物詳細の応答を読み取れませんでした。${error.message}',
-      );
+      throw BuildingDetailApiException('建物詳細の応答を読み取れませんでした。${error.message}');
     }
   }
 
@@ -74,9 +72,7 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
     try {
       return BuildingPhotoData.fromJson(response);
     } on FormatException catch (error) {
-      throw BuildingDetailApiException(
-        '写真データの応答を読み取れませんでした。${error.message}',
-      );
+      throw BuildingDetailApiException('写真データの応答を読み取れませんでした。${error.message}');
     }
   }
 
@@ -129,9 +125,7 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
 
       return decoded;
     } on TimeoutException {
-      throw const BuildingDetailApiException(
-        'Apps Scriptから時間内に応答がありませんでした。',
-      );
+      throw const BuildingDetailApiException('Apps Scriptから時間内に応答がありませんでした。');
     } on FormatException catch (error) {
       throw BuildingDetailApiException(
         'Apps Scriptの応答を読み取れませんでした。${error.message}',

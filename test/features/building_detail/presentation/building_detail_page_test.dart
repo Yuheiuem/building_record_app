@@ -11,9 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1000);
     addTearDown(tester.view.reset);
