@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/routing/app_routes.dart';
 import '../../../data/models/bootstrap_data.dart';
 import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
@@ -19,12 +21,14 @@ class BrowsePage extends StatefulWidget {
     required this.authService,
     this.bootstrapApiService,
     this.enableNetworkTiles = true,
+    this.onOpenBuilding,
     super.key,
   });
 
   final AuthService authService;
   final BootstrapApiService? bootstrapApiService;
   final bool enableNetworkTiles;
+  final ValueChanged<Building>? onOpenBuilding;
 
   @override
   State<BrowsePage> createState() => _BrowsePageState();
@@ -140,7 +144,9 @@ class _BrowsePageState extends State<BrowsePage> {
   }
 
   List<Building> get _allCoordinateBuildings {
-    return coordinateBuildings(_bootstrapData?.buildings ?? const <Building>[]);
+    return coordinateBuildings(
+      _bootstrapData?.buildings ?? const <Building>[],
+    );
   }
 
   List<Building> get _visibleBuildings {
@@ -161,6 +167,16 @@ class _BrowsePageState extends State<BrowsePage> {
               !building.isDeleted && !buildingHasCoordinates(building),
         )
         .length;
+  }
+
+  void _openBuilding(Building building) {
+    final ValueChanged<Building>? callback = widget.onOpenBuilding;
+    if (callback != null) {
+      callback(building);
+      return;
+    }
+
+    context.push(AppRoutes.buildingDetail(building.buildingId));
   }
 
   @override
@@ -213,6 +229,7 @@ class _BrowsePageState extends State<BrowsePage> {
               mapRevision: _mapRevision,
               enableNetworkTiles: widget.enableNetworkTiles,
               onPositionChanged: _handleMapPositionChanged,
+              onOpenBuilding: _openBuilding,
             );
 
             if (wideLayout) {
@@ -308,7 +325,9 @@ class _BrowseToolbar extends StatelessWidget {
                                 ? 'Google Sheetsから建物を取得します。'
                                 : '地図を動かすと、右の一覧を表示範囲に合わせて更新します。',
                             style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: colorScheme.onSurfaceVariant),
+                                ?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
                           ),
                         ],
                       ),
@@ -359,7 +378,10 @@ class _BrowseToolbar extends StatelessWidget {
               children: <Widget>[
                 _BrowseCountChip(label: '地図表示範囲', count: visibleCount),
                 _BrowseCountChip(label: '座標あり', count: coordinateCount),
-                _BrowseCountChip(label: '座標なし', count: missingCoordinateCount),
+                _BrowseCountChip(
+                  label: '座標なし',
+                  count: missingCoordinateCount,
+                ),
                 if (data != null)
                   _BrowseCountChip(label: '全建物', count: data!.counts.buildings),
               ],
@@ -438,6 +460,7 @@ class _BrowseWorkspace extends StatelessWidget {
     required this.mapRevision,
     required this.enableNetworkTiles,
     required this.onPositionChanged,
+    required this.onOpenBuilding,
   });
 
   final bool wideLayout;
@@ -450,6 +473,7 @@ class _BrowseWorkspace extends StatelessWidget {
   final int mapRevision;
   final bool enableNetworkTiles;
   final void Function(MapCamera camera, bool hasGesture) onPositionChanged;
+  final ValueChanged<Building> onOpenBuilding;
 
   @override
   Widget build(BuildContext context) {
@@ -466,6 +490,7 @@ class _BrowseWorkspace extends StatelessWidget {
       buildings: visibleBuildings,
       tagsById: tagsById,
       fillAvailableHeight: wideLayout,
+      onOpenBuilding: onOpenBuilding,
     );
 
     if (wideLayout) {
@@ -511,8 +536,8 @@ class _BuildingMapCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool showLabels =
-        visibleBounds != null && shouldShowBuildingLabels(visibleBounds!);
+    final bool showLabels = visibleBounds != null &&
+        shouldShowBuildingLabels(visibleBounds!);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -611,9 +636,7 @@ class _BuildingMap extends StatelessWidget {
               LatLng(building.latitude!, building.longitude!),
         )
         .toList(growable: false);
-    final LatLng initialCenter = points.isEmpty
-        ? _fallbackCenter
-        : points.first;
+    final LatLng initialCenter = points.isEmpty ? _fallbackCenter : points.first;
     final CameraFit? initialCameraFit = points.length >= 2
         ? CameraFit.coordinates(
             coordinates: points,
@@ -661,9 +684,9 @@ class _BuildingMap extends StatelessWidget {
           child: IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.surface.withValues(alpha: 0.88),
+                color: Theme.of(context).colorScheme.surface.withValues(
+                  alpha: 0.88,
+                ),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Padding(
@@ -687,7 +710,9 @@ class _BuildingMap extends StatelessWidget {
       Icons.location_on,
       size: 34,
       color: colorScheme.primary,
-      shadows: const <Shadow>[Shadow(color: Colors.white, blurRadius: 4)],
+      shadows: const <Shadow>[
+        Shadow(color: Colors.white, blurRadius: 4),
+      ],
     );
 
     if (!showLabels) {
@@ -722,9 +747,9 @@ class _BuildingMap extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             pin,
@@ -740,11 +765,13 @@ class _VisibleBuildingListCard extends StatelessWidget {
     required this.buildings,
     required this.tagsById,
     required this.fillAvailableHeight,
+    required this.onOpenBuilding,
   });
 
   final List<Building> buildings;
   final Map<String, BuildingTag> tagsById;
   final bool fillAvailableHeight;
+  final ValueChanged<Building> onOpenBuilding;
 
   @override
   Widget build(BuildContext context) {
@@ -764,6 +791,7 @@ class _VisibleBuildingListCard extends StatelessWidget {
               return _BuildingListItem(
                 building: buildings[index],
                 tagsById: tagsById,
+                onOpenBuilding: onOpenBuilding,
               );
             },
           );
@@ -772,7 +800,9 @@ class _VisibleBuildingListCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: fillAvailableHeight ? MainAxisSize.max : MainAxisSize.min,
+        mainAxisSize: fillAvailableHeight
+            ? MainAxisSize.max
+            : MainAxisSize.min,
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
@@ -786,8 +816,9 @@ class _VisibleBuildingListCard extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         '表示範囲の建物',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       Text(
                         '北から順に表示しています。',
@@ -801,14 +832,11 @@ class _VisibleBuildingListCard extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          if (fillAvailableHeight)
-            Expanded(child: listContent)
-          else
-            listContent,
+          if (fillAvailableHeight) Expanded(child: listContent) else listContent,
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Text(
-              '建物詳細・訪問履歴・写真は段階4-2で開けるようにします。',
+              '建物を選ぶと、詳細・訪問履歴・写真を開きます。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -836,7 +864,10 @@ class _BuildingListEmptyState extends StatelessWidget {
             color: Theme.of(context).colorScheme.primary,
           ),
           const SizedBox(height: 10),
-          const Text('現在の地図範囲または検索条件に合う建物はありません。', textAlign: TextAlign.center),
+          const Text(
+            '現在の地図範囲または検索条件に合う建物はありません。',
+            textAlign: TextAlign.center,
+          ),
         ],
       ),
     );
@@ -844,67 +875,83 @@ class _BuildingListEmptyState extends StatelessWidget {
 }
 
 class _BuildingListItem extends StatelessWidget {
-  const _BuildingListItem({required this.building, required this.tagsById});
+  const _BuildingListItem({
+    required this.building,
+    required this.tagsById,
+    required this.onOpenBuilding,
+  });
 
   final Building building;
   final Map<String, BuildingTag> tagsById;
+  final ValueChanged<Building> onOpenBuilding;
 
   @override
   Widget build(BuildContext context) {
     final List<String> tagNames = _resolveTagNames(building, tagsById);
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
+    return Material(
       key: ValueKey<String>('browse-building-${building.buildingId}'),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+      color: colorScheme.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.outlineVariant),
+        side: BorderSide(color: colorScheme.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Row(
+      child: InkWell(
+        onTap: () => onOpenBuilding(building),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Icon(Icons.apartment_outlined, color: colorScheme.primary),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  building.buildingName,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      building.buildingName,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (building.address != null) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Text(
+                        building.address!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (tagNames.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: tagNames
+                            .map(
+                              (String tagName) => Chip(
+                                visualDensity: VisualDensity.compact,
+                                label: Text(tagName),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+                    ],
+                  ],
                 ),
+              ),
+              const SizedBox(width: 8),
+              const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(Icons.chevron_right),
               ),
             ],
           ),
-          if (building.address != null) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              building.address!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-          if (tagNames.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: tagNames
-                  .map(
-                    (String tagName) => Chip(
-                      visualDensity: VisualDensity.compact,
-                      label: Text(tagName),
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

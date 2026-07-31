@@ -48,6 +48,18 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'getBuildingDetail':
+        return handleGetBuildingDetail(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'getPhotoData':
+        return handleGetPhotoData(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'createTag':
         return handleCreateTag(
           requestId,
@@ -111,7 +123,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '3-4B',
+      stage: '4-2',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -212,7 +224,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.13.0',
+        clientVersion: 'v0.15.0',
         payload: {}
       })
     }

@@ -5,6 +5,7 @@ import '../../data/services/auth_service.dart';
 import '../../data/services/bootstrap_api_service.dart';
 import '../../features/auth/presentation/sign_in_page.dart';
 import '../../features/browse/presentation/browse_page.dart';
+import '../../features/building_detail/presentation/building_detail_page.dart';
 import '../../features/diagnostics/presentation/diagnostics_page.dart';
 import '../../features/home/presentation/home_page.dart';
 import '../../features/record/presentation/record_page.dart';
@@ -29,6 +30,7 @@ GoRouter createAppRouter({
         }
 
         final String requestedLocation = _requestedLocation(state);
+
         return Uri(
           path: AppRoutes.loading,
           queryParameters: <String, String>{'from': requestedLocation},
@@ -45,6 +47,7 @@ GoRouter createAppRouter({
         }
 
         final String requestedLocation = _requestedLocation(state);
+
         return Uri(
           path: AppRoutes.signIn,
           queryParameters: <String, String>{'from': requestedLocation},
@@ -88,7 +91,19 @@ GoRouter createAppRouter({
       GoRoute(
         path: AppRoutes.browse,
         builder: (BuildContext context, GoRouterState state) {
-          return BrowsePage(authService: authService);
+          return BrowsePage(
+            authService: authService,
+            bootstrapApiService: bootstrapApiService,
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.buildingDetailPattern,
+        builder: (BuildContext context, GoRouterState state) {
+          return BuildingDetailPage(
+            authService: authService,
+            buildingId: state.pathParameters['buildingId']!,
+          );
         },
       ),
       GoRoute(
@@ -113,6 +128,7 @@ String _requestedLocation(GoRouterState state) {
   }
 
   final String currentLocation = state.uri.toString();
+
   if (_isRestorableLocation(currentLocation)) {
     return currentLocation;
   }
@@ -127,6 +143,7 @@ bool _isRestorableLocation(String? location) {
   }
 
   final Uri? uri = Uri.tryParse(location);
+
   if (uri == null) {
     return false;
   }

@@ -9,6 +9,7 @@ import 'data/services/auth_service.dart';
 import 'data/services/bootstrap_api_service.dart';
 import 'data/services/google_auth_service.dart';
 
+
 class BuildingRecordApp extends StatefulWidget {
   const BuildingRecordApp({
     super.key,

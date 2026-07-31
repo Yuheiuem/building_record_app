@@ -8,13 +8,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('建物を地図範囲の一覧へ表示し検索と再取得ができる', (WidgetTester tester) async {
+  testWidgets('建物を地図範囲の一覧へ表示し検索と再取得ができる', (
+    WidgetTester tester,
+  ) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 900);
     addTearDown(tester.view.reset);
 
     final _FakeAuthService authService = _FakeAuthService();
     final _FakeBootstrapApiService apiService = _FakeBootstrapApiService();
+    Building? openedBuilding;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -22,6 +25,9 @@ void main() {
           authService: authService,
           bootstrapApiService: apiService,
           enableNetworkTiles: false,
+          onOpenBuilding: (Building building) {
+            openedBuilding = building;
+          },
         ),
       ),
     );
@@ -38,6 +44,12 @@ void main() {
     expect(find.text('南の建物'), findsOneWidget);
     expect(find.text('国土地理院'), findsOneWidget);
     expect(find.text('設計第一部'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('browse-building-north')),
+    );
+    await tester.pump();
+    expect(openedBuilding?.buildingId, 'north');
 
     await tester.enterText(
       find.byKey(const Key('browse-building-search')),
