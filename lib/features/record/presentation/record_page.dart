@@ -62,7 +62,8 @@ class _RecordPageState extends State<RecordPage> {
         widget.locationService ?? GeolocatorRecordLocationService();
     _ownsTagApiService = widget.tagApiService == null;
     _tagApiService = widget.tagApiService ?? HttpTagApiService();
-    _ownsRecordSubmissionApiService = widget.recordSubmissionApiService == null;
+    _ownsRecordSubmissionApiService =
+        widget.recordSubmissionApiService == null;
     _recordSubmissionApiService =
         widget.recordSubmissionApiService ?? HttpRecordSubmissionApiService();
     _controller = RecordDraftController(
@@ -186,17 +187,15 @@ class _RecordPageState extends State<RecordPage> {
       return;
     }
 
-    final RecordDraftLocation? currentLocation = _controller.visitLocation;
     final Building? selectedBuilding = _controller.selectedExistingBuilding;
-    final RecordDraftLocation? selectedLocation = await Navigator.of(context)
-        .push<RecordDraftLocation>(
+    final RecordDraftLocation? selectedLocation =
+        await Navigator.of(context).push<RecordDraftLocation>(
           MaterialPageRoute<RecordDraftLocation>(
             builder: (BuildContext context) {
               return MapLocationPickerPage(
-                initialLatitude:
-                    currentLocation?.latitude ?? selectedBuilding?.latitude,
-                initialLongitude:
-                    currentLocation?.longitude ?? selectedBuilding?.longitude,
+                initialLatitude: selectedBuilding?.latitude,
+                initialLongitude: selectedBuilding?.longitude,
+                locationService: _locationService,
               );
             },
           ),
@@ -249,22 +248,23 @@ class _RecordPageState extends State<RecordPage> {
                                 onAddPhotos: _controller.addPhotos,
                                 onClearPhotos: _confirmClearPhotos,
                               ),
-                              if (_controller.errorMessage != null) ...<Widget>[
-                                const SizedBox(height: 12),
-                                _MessagePanel(
-                                  icon: Icons.error_outline,
-                                  message: _controller.errorMessage!,
-                                  isError: true,
-                                ),
-                              ],
-                              if (_controller.noticeMessage !=
-                                  null) ...<Widget>[
-                                const SizedBox(height: 12),
-                                _MessagePanel(
-                                  icon: Icons.check_circle_outline,
-                                  message: _controller.noticeMessage!,
-                                ),
-                              ],
+                              if (_controller.errorMessage != null)
+                                ...<Widget>[
+                                  const SizedBox(height: 12),
+                                  _MessagePanel(
+                                    icon: Icons.error_outline,
+                                    message: _controller.errorMessage!,
+                                    isError: true,
+                                  ),
+                                ],
+                              if (_controller.noticeMessage != null)
+                                ...<Widget>[
+                                  const SizedBox(height: 12),
+                                  _MessagePanel(
+                                    icon: Icons.check_circle_outline,
+                                    message: _controller.noticeMessage!,
+                                  ),
+                                ],
                               const SizedBox(height: 20),
                               if (_controller.hasPhotos)
                                 _PhotoDraftSection(
@@ -370,14 +370,15 @@ class _RecordSaveSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            const Text('建物と訪問を準備し、複数写真は最大2枚ずつ並行して非公開Driveへ保存します。'),
+            const Text(
+              '建物と訪問を準備し、複数写真は最大2枚ずつ並行して非公開Driveへ保存します。',
+            ),
             const SizedBox(height: 16),
             _SubmissionStatusPanel(controller: controller),
             if (showPhotoProgress) ...<Widget>[
               const SizedBox(height: 16),
               LinearProgressIndicator(
-                value:
-                    controller.submissionPhase ==
+                value: controller.submissionPhase ==
                             RecordSubmissionPhase.starting ||
                         controller.submissionPhase ==
                             RecordSubmissionPhase.finalizing
@@ -405,9 +406,9 @@ class _RecordSaveSection extends StatelessWidget {
               Text(
                 '今回の保存処理：${_formatElapsed(controller.lastSubmissionDuration!)}',
                 textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
             _UploadPerformanceDetails(controller: controller),
@@ -519,33 +520,34 @@ class _SubmissionStatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ({IconData icon, String label}) details =
-        switch (controller.submissionPhase) {
-          RecordSubmissionPhase.idle => (
-            icon: Icons.edit_note_outlined,
-            label: '下書きの入力内容を確認してください。',
-          ),
-          RecordSubmissionPhase.starting => (
-            icon: Icons.inventory_2_outlined,
-            label: '建物と訪問の保存準備をしています。',
-          ),
-          RecordSubmissionPhase.uploading => (
-            icon: Icons.photo_library_outlined,
-            label: '写真を最大2枚ずつ送信しています。',
-          ),
-          RecordSubmissionPhase.finalizing => (
-            icon: Icons.fact_check_outlined,
-            label: '保存枚数を確認して記録を確定しています。',
-          ),
-          RecordSubmissionPhase.failed => (
-            icon: Icons.sync_problem_outlined,
-            label: '入力内容と送信済み写真を保持しています。',
-          ),
-          RecordSubmissionPhase.succeeded => (
-            icon: Icons.task_alt_outlined,
-            label: '記録の保存が完了しました。',
-          ),
-        };
+    final ({IconData icon, String label}) details = switch (
+      controller.submissionPhase
+    ) {
+      RecordSubmissionPhase.idle => (
+          icon: Icons.edit_note_outlined,
+          label: '下書きの入力内容を確認してください。',
+        ),
+      RecordSubmissionPhase.starting => (
+          icon: Icons.inventory_2_outlined,
+          label: '建物と訪問の保存準備をしています。',
+        ),
+      RecordSubmissionPhase.uploading => (
+          icon: Icons.photo_library_outlined,
+          label: '写真を最大2枚ずつ送信しています。',
+        ),
+      RecordSubmissionPhase.finalizing => (
+          icon: Icons.fact_check_outlined,
+          label: '保存枚数を確認して記録を確定しています。',
+        ),
+      RecordSubmissionPhase.failed => (
+          icon: Icons.sync_problem_outlined,
+          label: '入力内容と送信済み写真を保持しています。',
+        ),
+      RecordSubmissionPhase.succeeded => (
+          icon: Icons.task_alt_outlined,
+          label: '記録の保存が完了しました。',
+        ),
+    };
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -579,21 +581,21 @@ class _PhotoUploadProgressRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ({IconData icon, String label}) details = switch (status) {
       RecordPhotoUploadStatus.pending => (
-        icon: Icons.schedule_outlined,
-        label: '未送信',
-      ),
+          icon: Icons.schedule_outlined,
+          label: '未送信',
+        ),
       RecordPhotoUploadStatus.uploading => (
-        icon: Icons.sync_outlined,
-        label: '送信中',
-      ),
+          icon: Icons.sync_outlined,
+          label: '送信中',
+        ),
       RecordPhotoUploadStatus.uploaded => (
-        icon: Icons.check_circle_outline,
-        label: '送信済み',
-      ),
+          icon: Icons.check_circle_outline,
+          label: '送信済み',
+        ),
       RecordPhotoUploadStatus.failed => (
-        icon: Icons.error_outline,
-        label: '再送待ち',
-      ),
+          icon: Icons.error_outline,
+          label: '再送待ち',
+        ),
     };
 
     return Padding(
@@ -628,9 +630,13 @@ class _UploadPerformanceDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final List<({RecordDraftPhoto photo, RecordUploadPerformance performance})>
-    entries =
-        <({RecordDraftPhoto photo, RecordUploadPerformance performance})>[];
+    final List<({
+      RecordDraftPhoto photo,
+      RecordUploadPerformance performance,
+    })> entries = <({
+      RecordDraftPhoto photo,
+      RecordUploadPerformance performance,
+    })>[];
 
     for (final RecordDraftPhoto photo in controller.photos) {
       final RecordUploadPerformance? performance = controller
@@ -675,7 +681,8 @@ class _UploadPerformanceDetails extends StatelessWidget {
                 'Drive ${_formatMilliseconds(performance.driveSaveMs!)}',
               if (performance.sheetWriteMs != null)
                 'Sheets ${_formatMilliseconds(performance.sheetWriteMs!)}',
-              if (performance.finalizeMs != null && performance.finalizeMs! > 0)
+              if (performance.finalizeMs != null &&
+                  performance.finalizeMs! > 0)
                 '確定 ${_formatMilliseconds(performance.finalizeMs!)}',
               if (performance.handlerTotalMs != null)
                 'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
@@ -770,7 +777,9 @@ class _DraftHeader extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            const Text('建築の写真を複数選択できます。選択した写真は送信前の下書きとして、この画面内だけに保持します。'),
+            const Text(
+              '建築の写真を複数選択できます。選択した写真は送信前の下書きとして、この画面内だけに保持します。',
+            ),
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -960,11 +969,10 @@ class _ReauthenticationPanel extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         'Googleログインの有効期限が切れました',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: colors.onErrorContainer,
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: colors.onErrorContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -1136,7 +1144,10 @@ class _NewBuildingDraftForm extends StatelessWidget {
           controller: controller,
           chipKeyPrefix: 'new-building-tag-construction',
           onToggleTag: (String tagId) {
-            controller.toggleBuildingTag(BuildingTagType.construction, tagId);
+            controller.toggleBuildingTag(
+              BuildingTagType.construction,
+              tagId,
+            );
           },
           onAddTag: () => onAddTag(BuildingTagType.construction),
         ),
@@ -1223,22 +1234,19 @@ class _TagSelectorAccordion extends StatelessWidget {
                 : Wrap(
                     spacing: 8,
                     runSpacing: 8,
-                    children: tags
-                        .map((BuildingTag tag) {
-                          return FilterChip(
-                            key: Key('$chipKeyPrefix-${tag.tagId}'),
-                            selected: existingBuildingSelection
-                                ? controller.isExistingBuildingTagSelected(
-                                    type,
-                                    tag.tagId,
-                                  )
-                                : controller.isTagSelected(type, tag.tagId),
-                            onSelected: (bool selected) =>
-                                onToggleTag(tag.tagId),
-                            label: Text(tag.tagName),
-                          );
-                        })
-                        .toList(growable: false),
+                    children: tags.map((BuildingTag tag) {
+                      return FilterChip(
+                        key: Key('$chipKeyPrefix-${tag.tagId}'),
+                        selected: existingBuildingSelection
+                            ? controller.isExistingBuildingTagSelected(
+                                type,
+                                tag.tagId,
+                              )
+                            : controller.isTagSelected(type, tag.tagId),
+                        onSelected: (bool selected) => onToggleTag(tag.tagId),
+                        label: Text(tag.tagName),
+                      );
+                    }).toList(growable: false),
                   ),
           ),
           const SizedBox(height: 12),
@@ -1803,7 +1811,9 @@ class _VisitLocationPanel extends StatelessWidget {
           ],
           if (controller.locationNoticeMessage != null) ...<Widget>[
             const SizedBox(height: 12),
-            _InlineLocationMessage(message: controller.locationNoticeMessage!),
+            _InlineLocationMessage(
+              message: controller.locationNoticeMessage!,
+            ),
           ],
           const SizedBox(height: 16),
           Wrap(
@@ -1970,9 +1980,7 @@ class _InlineLocationMessage extends StatelessWidget {
             size: 20,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(message, style: TextStyle(color: foreground)),
-          ),
+          Expanded(child: Text(message, style: TextStyle(color: foreground))),
         ],
       ),
     );

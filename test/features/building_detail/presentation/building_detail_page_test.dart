@@ -7,18 +7,23 @@ import 'package:building_record_app/data/models/building_detail_data.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/building_detail_api_service.dart';
+import 'package:building_record_app/data/services/building_location_api_service.dart';
 import 'package:building_record_app/features/building_detail/presentation/building_detail_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (WidgetTester tester) async {
+  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (
+    WidgetTester tester,
+  ) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1000);
     addTearDown(tester.view.reset);
 
     final _FakeBuildingDetailApiService apiService =
         _FakeBuildingDetailApiService();
+    final _FakeBuildingLocationApiService locationApiService =
+        _FakeBuildingLocationApiService();
 
     await tester.pumpWidget(
       MaterialApp(
@@ -26,6 +31,7 @@ void main() {
           authService: _FakeAuthService(),
           buildingId: 'building-12345678',
           buildingDetailApiService: apiService,
+          buildingLocationApiService: locationApiService,
           enableNetworkTiles: false,
         ),
       ),
@@ -43,15 +49,40 @@ void main() {
     expect(find.text('外観を見学した。'), findsOneWidget);
     expect(find.text('写真ギャラリー'), findsOneWidget);
     expect(find.text('訪問履歴'), findsOneWidget);
-
-    await tester.pump(const Duration(milliseconds: 100));
+    expect(
+      find.byKey(const Key('record-building-revisit')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('building-representative-location-chip')),
+      findsOneWidget,
+    );
     expect(apiService.photoCallCount, 1);
+
+    await tester.tap(
+      find.byKey(const Key('building-representative-location-chip')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('地図で位置を指定'), findsOneWidget);
+    expect(find.text('緯度 35.681200'), findsOneWidget);
+    expect(find.text('経度 139.767100'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('confirm-map-location')));
+    await tester.pumpAndSettle();
+
+    expect(locationApiService.updateCallCount, 1);
+    expect(locationApiService.lastBuildingId, 'building-12345678');
+    expect(locationApiService.lastLatitude, 35.6812);
+    expect(locationApiService.lastLongitude, 139.7671);
+    expect(apiService.detailCallCount, 2);
+    expect(find.text('建物の代表位置を更新しました。'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('refresh-building-detail')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(apiService.detailCallCount, 2);
+    expect(apiService.detailCallCount, 3);
   });
 }
 
@@ -202,6 +233,32 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
       bytes: _pngBytes,
       stage: '4-2',
     );
+  }
+
+  @override
+  void close() {}
+}
+
+class _FakeBuildingLocationApiService
+    implements BuildingLocationApiService {
+  int updateCallCount = 0;
+  String? lastBuildingId;
+  double? lastLatitude;
+  double? lastLongitude;
+
+  @override
+  Future<void> updateBuildingLocation({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    updateCallCount += 1;
+    lastBuildingId = buildingId;
+    lastLatitude = latitude;
+    lastLongitude = longitude;
   }
 
   @override

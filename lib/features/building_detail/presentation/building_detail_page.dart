@@ -11,15 +11,19 @@ import '../../../core/routing/app_routes.dart';
 import '../../../data/models/building.dart';
 import '../../../data/models/building_detail_data.dart';
 import '../../../data/models/building_tag.dart';
+import '../../../data/models/record_draft_location.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
+import '../../../data/services/building_location_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
+import '../../record/presentation/map_location_picker_page.dart';
 
 class BuildingDetailPage extends StatefulWidget {
   const BuildingDetailPage({
     required this.authService,
     required this.buildingId,
     this.buildingDetailApiService,
+    this.buildingLocationApiService,
     this.enableNetworkTiles = true,
     super.key,
   });
@@ -27,6 +31,7 @@ class BuildingDetailPage extends StatefulWidget {
   final AuthService authService;
   final String buildingId;
   final BuildingDetailApiService? buildingDetailApiService;
+  final BuildingLocationApiService? buildingLocationApiService;
   final bool enableNetworkTiles;
 
   @override
@@ -38,6 +43,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
 
   late final BuildingDetailApiService _apiService;
   late final bool _ownsApiService;
+  late final BuildingLocationApiService _locationApiService;
+  late final bool _ownsLocationApiService;
 
   final Map<String, Future<BuildingPhotoData>> _photoFutures =
       <String, Future<BuildingPhotoData>>{};
@@ -53,6 +60,10 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _ownsApiService = widget.buildingDetailApiService == null;
     _apiService =
         widget.buildingDetailApiService ?? HttpBuildingDetailApiService();
+    _ownsLocationApiService = widget.buildingLocationApiService == null;
+    _locationApiService =
+        widget.buildingLocationApiService ??
+        HttpBuildingLocationApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -76,6 +87,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   void dispose() {
     if (_ownsApiService) {
       _apiService.close();
+    }
+    if (_ownsLocationApiService) {
+      _locationApiService.close();
     }
     super.dispose();
   }
@@ -159,6 +173,87 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     });
   }
 
+  Future<void> _editBuildingLocation() async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final Building building = detail.building;
+    final RecordDraftLocation? selectedLocation = await Navigator.of(context)
+        .push<RecordDraftLocation>(
+          MaterialPageRoute<RecordDraftLocation>(
+            builder: (BuildContext context) {
+              return MapLocationPickerPage(
+                initialLatitude: building.latitude,
+                initialLongitude: building.longitude,
+                enableNetworkTiles: widget.enableNetworkTiles,
+              );
+            },
+          ),
+        );
+
+    if (!mounted || selectedLocation == null) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _locationApiService.updateBuildingLocation(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: building.buildingId,
+        latitude: selectedLocation.latitude,
+        longitude: selectedLocation.longitude,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('建物の代表位置を更新しました。')),
+      );
+    } on BuildingLocationApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '代表位置を更新できませんでした。もう一度送信してください。';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -210,6 +305,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                     tagsById: tagsById,
                     enableNetworkTiles: widget.enableNetworkTiles,
                     onRefresh: _loadDetail,
+                    onEditLocation: _editBuildingLocation,
                     onRecordRevisit: () {
                       unawaited(
                         context.push<void>(
@@ -239,7 +335,10 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                         : null,
                   ),
                   const SizedBox(height: 12),
-                  _VisitHistorySection(detail: detail, tagsById: tagsById),
+                  _VisitHistorySection(
+                    detail: detail,
+                    tagsById: tagsById,
+                  ),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -264,15 +363,16 @@ class _BuildingOverviewSection extends StatelessWidget {
     required this.tagsById,
     required this.enableNetworkTiles,
     required this.onRefresh,
+    required this.onEditLocation,
     required this.onRecordRevisit,
   });
-
-  final VoidCallback onRecordRevisit;
 
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
   final bool enableNetworkTiles;
   final Future<void> Function() onRefresh;
+  final VoidCallback onEditLocation;
+  final VoidCallback onRecordRevisit;
 
   @override
   Widget build(BuildContext context) {
@@ -285,6 +385,7 @@ class _BuildingOverviewSection extends StatelessWidget {
           detail: detail,
           tagsById: tagsById,
           onRefresh: onRefresh,
+          onEditLocation: onEditLocation,
           onRecordRevisit: onRecordRevisit,
         );
         final Widget map = _BuildingLocationCard(
@@ -298,7 +399,10 @@ class _BuildingOverviewSection extends StatelessWidget {
             children: <Widget>[
               Expanded(flex: 3, child: information),
               const SizedBox(width: 12),
-              Expanded(flex: 2, child: SizedBox(height: 420, child: map)),
+              Expanded(
+                flex: 2,
+                child: SizedBox(height: 420, child: map),
+              ),
             ],
           );
         }
@@ -321,13 +425,15 @@ class _BuildingInformationCard extends StatelessWidget {
     required this.detail,
     required this.tagsById,
     required this.onRefresh,
+    required this.onEditLocation,
     required this.onRecordRevisit,
   });
 
-  final VoidCallback onRecordRevisit;
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
   final Future<void> Function() onRefresh;
+  final VoidCallback onEditLocation;
+  final VoidCallback onRecordRevisit;
 
   @override
   Widget build(BuildContext context) {
@@ -392,9 +498,11 @@ class _BuildingInformationCard extends StatelessWidget {
                   label: '写真 ${detail.counts.photos}枚',
                 ),
                 if (building.latitude != null && building.longitude != null)
-                  const _CountChip(
+                  _CountChip(
+                    key: const Key('building-representative-location-chip'),
                     icon: Icons.location_on_outlined,
                     label: '代表位置あり',
+                    onPressed: onEditLocation,
                   ),
               ],
             ),
@@ -431,15 +539,30 @@ class _BuildingInformationCard extends StatelessWidget {
 }
 
 class _CountChip extends StatelessWidget {
-  const _CountChip({required this.icon, required this.label});
+  const _CountChip({
+    required this.icon,
+    required this.label,
+    this.onPressed,
+    super.key,
+  });
 
   final IconData icon;
   final String label;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
+    final Widget avatar = Icon(icon, size: 18);
+    if (onPressed != null) {
+      return ActionChip(
+        avatar: avatar,
+        label: Text(label),
+        visualDensity: VisualDensity.compact,
+        onPressed: onPressed,
+      );
+    }
     return Chip(
-      avatar: Icon(icon, size: 18),
+      avatar: avatar,
       label: Text(label),
       visualDensity: VisualDensity.compact,
     );
@@ -472,9 +595,9 @@ class _TagGroup extends StatelessWidget {
             padding: const EdgeInsets.only(top: 7),
             child: Text(
               title,
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
@@ -577,7 +700,9 @@ class _BuildingLocationCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SimpleAttributionWidget(source: Text('国土地理院')),
+                      const SimpleAttributionWidget(
+                        source: Text('国土地理院'),
+                      ),
                     ],
                   ),
           ),
@@ -696,102 +821,101 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<BuildingPhotoData>(
       future: future,
-      builder:
-          (BuildContext context, AsyncSnapshot<BuildingPhotoData> snapshot) {
-            if (snapshot.hasData) {
-              final BuildingPhotoData data = snapshot.data!;
-              return Material(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                clipBehavior: Clip.antiAlias,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-                child: InkWell(
-                  onTap: () => _showPhotoDialog(context, photo, data),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      Expanded(
-                        child: Image.memory(
-                          data.bytes,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder:
-                              (
-                                BuildContext context,
-                                Object error,
-                                StackTrace? stackTrace,
-                              ) {
-                                return const Center(
-                                  child: Icon(Icons.broken_image, size: 42),
-                                );
-                              },
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: Text(
-                                _formatDateTime(
-                                  photo.takenAt ?? photo.createdAt,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                            const Icon(Icons.zoom_in, size: 18),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-
-            if (snapshot.hasError) {
-              return DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: <Widget>[
-                      const Icon(Icons.broken_image, size: 36),
-                      const SizedBox(height: 8),
-                      const Text('写真を取得できませんでした。'),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: onRetry,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('再試行'),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(12),
+      builder: (
+        BuildContext context,
+        AsyncSnapshot<BuildingPhotoData> snapshot,
+      ) {
+        if (snapshot.hasData) {
+          final BuildingPhotoData data = snapshot.data!;
+          return Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
               ),
-              child: const Center(child: CircularProgressIndicator()),
-            );
-          },
+            ),
+            child: InkWell(
+              onTap: () => _showPhotoDialog(context, photo, data),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Expanded(
+                    child: Image.memory(
+                      data.bytes,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      errorBuilder: (
+                        BuildContext context,
+                        Object error,
+                        StackTrace? stackTrace,
+                      ) {
+                        return const Center(
+                          child: Icon(Icons.broken_image, size: 42),
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            _formatDateTime(photo.takenAt ?? photo.createdAt),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        const Icon(Icons.zoom_in, size: 18),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  const Icon(Icons.broken_image, size: 36),
+                  const SizedBox(height: 8),
+                  const Text('写真を取得できませんでした。'),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('再試行'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Center(child: CircularProgressIndicator()),
+        );
+      },
     );
   }
 
@@ -1040,7 +1164,11 @@ class _SectionEmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(icon, size: 44, color: Theme.of(context).colorScheme.primary),
+          Icon(
+            icon,
+            size: 44,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           const SizedBox(height: 10),
           Text(message, textAlign: TextAlign.center),
         ],
