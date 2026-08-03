@@ -5,9 +5,6 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/config/app_config.dart';
 import '../../../data/models/record_draft_location.dart';
 
-import 'package:flutter/services.dart';
-import 'package:flutter_map/flutter_map.dart';
-
 class MapLocationPickerPage extends StatefulWidget {
   const MapLocationPickerPage({
     this.initialLatitude,
