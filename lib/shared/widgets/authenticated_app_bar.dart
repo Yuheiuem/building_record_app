@@ -13,20 +13,37 @@ class AuthenticatedAppBar extends StatelessWidget
     required this.authService,
     required this.title,
     this.showHomeAction = true,
+    this.showVersion = false,
     super.key,
   });
 
   final AuthService authService;
   final String title;
   final bool showHomeAction;
+  final bool showVersion;
 
   @override
   Size get preferredSize => const Size.fromHeight(kToolbarHeight + 1);
 
   @override
   Widget build(BuildContext context) {
+    final TextStyle? versionStyle = Theme.of(context).textTheme.labelSmall
+        ?.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w500,
+        );
+
     return AppBar(
-      title: Text(title),
+      title: showVersion
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(title),
+                Text(AppConfig.version, style: versionStyle),
+              ],
+            )
+          : Text(title),
       actions: <Widget>[
         if (showHomeAction)
           IconButton(

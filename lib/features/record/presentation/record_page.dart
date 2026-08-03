@@ -196,6 +196,7 @@ class _RecordPageState extends State<RecordPage> {
       appBar: AuthenticatedAppBar(
         authService: widget.authService,
         title: '建築を記録する',
+        showVersion: true,
       ),
       body: SafeArea(
         child: AnimatedBuilder(
@@ -268,8 +269,7 @@ class _RecordPageState extends State<RecordPage> {
                       ),
                       const SizedBox(height: 24),
                       _RecordSaveSection(controller: _controller),
-                      const SizedBox(height: 24),
-                      const AppVersionFooter(),
+                      const SizedBox(height: 8),
                     ],
                   ),
                 ),
@@ -348,7 +348,7 @@ class _RecordSaveSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            const Text('建物と訪問の下書きを作成し、写真を1枚ずつ非公開Driveへ保存します。'),
+            const Text('建物と訪問を準備し、複数写真は最大2枚ずつ並行して非公開Driveへ保存します。'),
             const SizedBox(height: 16),
             _SubmissionStatusPanel(controller: controller),
             if (showPhotoProgress) ...<Widget>[
@@ -509,7 +509,7 @@ class _SubmissionStatusPanel extends StatelessWidget {
           ),
           RecordSubmissionPhase.uploading => (
             icon: Icons.photo_library_outlined,
-            label: '写真を1枚ずつ送信しています。',
+            label: '写真を最大2枚ずつ送信しています。',
           ),
           RecordSubmissionPhase.finalizing => (
             icon: Icons.fact_check_outlined,
@@ -1714,7 +1714,7 @@ class _VisitDraftSection extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '写真は1枚ずつ送信します。途中で失敗した場合は、入力内容と送信済み写真を保持して失敗分だけ再送します。',
+                      '複数写真は最大2枚ずつ送信します。途中で失敗した場合は、入力内容と送信済み写真を保持して失敗分だけ再送します。',
                     ),
                   ),
                 ],

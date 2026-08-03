@@ -40,10 +40,7 @@ void main() {
     expect(find.text('今回の訪問'), findsOneWidget);
     expect(find.byKey(const Key('visit-impression-field')), findsOneWidget);
     expect(find.byKey(const Key('capture-current-location')), findsOneWidget);
-    expect(
-      find.text('${AppConfig.stage} / ${AppConfig.version}'),
-      findsOneWidget,
-    );
+    expect(find.text(AppConfig.version), findsOneWidget);
   });
 
   testWidgets('複数写真を選択して個別に削除できる', (WidgetTester tester) async {

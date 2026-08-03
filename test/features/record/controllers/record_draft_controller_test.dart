@@ -286,7 +286,30 @@ void main() {
     );
   });
 
-  test('建物・訪問・複数写真を順番に保存できる', () async {
+  test('写真1枚は従来の1通信保存を維持する', () async {
+    final _FakeRecordSubmissionApiService submissionService =
+        _FakeRecordSubmissionApiService();
+    final RecordDraftController controller = _createController(
+      photos: <RecordDraftPhoto>[
+        _photo(id: 'photo-single', fileName: 'single.jpg', byteSize: 1200),
+      ],
+      recordSubmissionApiService: submissionService,
+    );
+
+    await controller.addPhotos();
+    controller.setNewBuildingName('1枚保存テスト建物');
+    await controller.acquireCurrentLocation();
+    await controller.submitRecord();
+
+    expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
+    expect(submissionService.beginCallCount, 0);
+    expect(submissionService.finalizeCallCount, 0);
+    expect(submissionService.preparationCallCount, 1);
+    expect(submissionService.combinedFinalizeCallCount, 1);
+    expect(submissionService.uploadCallCount['photo-single'], 1);
+  });
+
+  test('建物・訪問を準備して複数写真を最大2枚ずつ保存できる', () async {
     final _FakeRecordSubmissionApiService submissionService =
         _FakeRecordSubmissionApiService();
     final RecordDraftController controller = _createController(
@@ -310,12 +333,13 @@ void main() {
 
     expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
     expect(controller.uploadedPhotoCount, 2);
-    expect(submissionService.beginCallCount, 0);
-    expect(submissionService.finalizeCallCount, 0);
+    expect(submissionService.beginCallCount, 1);
+    expect(submissionService.finalizeCallCount, 1);
     expect(submissionService.uploadCallCount['photo-save-1'], 1);
     expect(submissionService.uploadCallCount['photo-save-2'], 1);
-    expect(submissionService.preparationCallCount, 1);
-    expect(submissionService.combinedFinalizeCallCount, 1);
+    expect(submissionService.preparationCallCount, 0);
+    expect(submissionService.combinedFinalizeCallCount, 0);
+    expect(submissionService.maxConcurrentUploadCount, 2);
     expect(
       controller
           .photoUploadResult('photo-save-1')
@@ -357,12 +381,13 @@ void main() {
 
     expect(controller.submissionPhase, RecordSubmissionPhase.succeeded);
     expect(controller.uploadedPhotoCount, 2);
-    expect(submissionService.beginCallCount, 0);
+    expect(submissionService.beginCallCount, 1);
     expect(submissionService.uploadCallCount['photo-retry-1'], 1);
     expect(submissionService.uploadCallCount['photo-retry-2'], 2);
-    expect(submissionService.preparationCallCount, 1);
-    expect(submissionService.combinedFinalizeCallCount, 1);
-    expect(submissionService.finalizeCallCount, 0);
+    expect(submissionService.preparationCallCount, 0);
+    expect(submissionService.combinedFinalizeCallCount, 0);
+    expect(submissionService.finalizeCallCount, 1);
+    expect(submissionService.maxConcurrentUploadCount, 2);
   });
 }
 
@@ -559,6 +584,8 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
   int finalizeCallCount = 0;
   int preparationCallCount = 0;
   int combinedFinalizeCallCount = 0;
+  int currentConcurrentUploadCount = 0;
+  int maxConcurrentUploadCount = 0;
   String? lastBuildingName;
   List<String>? lastConstructionTagIds;
   List<String>? lastTriggerTagIds;
@@ -623,52 +650,64 @@ class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
     bool finalizeAfterUpload = false,
   }) async {
     uploadCallCount[photoId] = (uploadCallCount[photoId] ?? 0) + 1;
-
-    if (recordPreparation != null) {
-      preparationCallCount += 1;
-      lastBuildingName = recordPreparation.buildingName;
-      lastConstructionTagIds = recordPreparation.constructionTagIds;
-      lastTriggerTagIds = recordPreparation.triggerTagIds;
-      _buildingId = recordPreparation.buildingId;
-      _visitId = recordPreparation.visitId;
+    currentConcurrentUploadCount += 1;
+    if (currentConcurrentUploadCount > maxConcurrentUploadCount) {
+      maxConcurrentUploadCount = currentConcurrentUploadCount;
     }
 
-    if (_remainingFailures.remove(photoId)) {
-      throw const RecordSubmissionApiException('テスト用の送信失敗');
-    }
-    if (finalizeAfterUpload) {
-      combinedFinalizeCallCount += 1;
-    }
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
 
-    return UploadRecordPhotoResult(
-      photoId: photoId,
-      storageFileId: 'storage-$photoId',
-      byteSize: bytes.length,
-      displayOrder: displayOrder,
-      reused: false,
-      buildingId: _buildingId ?? buildingId,
-      visitId: _visitId ?? visitId,
-      recordPrepared: recordPreparation != null,
-      buildingCreated: recordPreparation?.buildingMode == 'new',
-      visitCreated: recordPreparation != null,
-      recordCompleted: finalizeAfterUpload,
-      photoCount: finalizeAfterUpload ? uploadCallCount.length : null,
-      saveMode: 'combined_photo_step',
-      performance: RecordUploadPerformance(
-        clientEncodeMs: 4,
-        clientRequestMs: 480,
-        authenticationMode: 'cache',
-        authenticationMs: 3,
-        lockWaitMs: 0,
-        lookupMs: 10,
-        base64DecodeMs: 2,
-        driveSaveMs: 300,
-        sheetWriteMs: 40,
-        draftPreparationMs: recordPreparation == null ? 0 : 120,
-        finalizeMs: finalizeAfterUpload ? 80 : 0,
-        handlerTotalMs: 370,
-      ),
-    );
+      if (recordPreparation != null) {
+        preparationCallCount += 1;
+        lastBuildingName = recordPreparation.buildingName;
+        lastConstructionTagIds = recordPreparation.constructionTagIds;
+        lastTriggerTagIds = recordPreparation.triggerTagIds;
+        _buildingId = recordPreparation.buildingId;
+        _visitId = recordPreparation.visitId;
+      }
+
+      if (_remainingFailures.remove(photoId)) {
+        throw const RecordSubmissionApiException('テスト用の送信失敗');
+      }
+      if (finalizeAfterUpload) {
+        combinedFinalizeCallCount += 1;
+      }
+
+      return UploadRecordPhotoResult(
+        photoId: photoId,
+        storageFileId: 'storage-$photoId',
+        byteSize: bytes.length,
+        displayOrder: displayOrder,
+        reused: false,
+        buildingId: _buildingId ?? buildingId,
+        visitId: _visitId ?? visitId,
+        recordPrepared: recordPreparation != null,
+        buildingCreated: recordPreparation?.buildingMode == 'new',
+        visitCreated: recordPreparation != null,
+        recordCompleted: finalizeAfterUpload,
+        photoCount: finalizeAfterUpload ? uploadCallCount.length : null,
+        saveMode: finalizeAfterUpload
+            ? 'combined_photo_step'
+            : 'parallel_photo_step',
+        performance: RecordUploadPerformance(
+          clientEncodeMs: 4,
+          clientRequestMs: 480,
+          authenticationMode: 'cache',
+          authenticationMs: 3,
+          lockWaitMs: 0,
+          lookupMs: 10,
+          base64DecodeMs: 2,
+          driveSaveMs: 300,
+          sheetWriteMs: 40,
+          draftPreparationMs: recordPreparation == null ? 0 : 120,
+          finalizeMs: finalizeAfterUpload ? 80 : 0,
+          handlerTotalMs: 370,
+        ),
+      );
+    } finally {
+      currentConcurrentUploadCount -= 1;
+    }
   }
 
   @override

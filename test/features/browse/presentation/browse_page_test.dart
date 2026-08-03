@@ -1,3 +1,4 @@
+import 'package:building_record_app/core/config/app_config.dart';
 import 'package:building_record_app/data/models/bootstrap_data.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
@@ -5,6 +6,7 @@ import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/features/browse/presentation/browse_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -35,6 +37,11 @@ void main() {
     expect(apiService.callCount, 1);
     expect(apiService.lastIdToken, 'test-id-token');
     expect(find.text('建物地図'), findsOneWidget);
+    expect(find.text(AppConfig.version), findsOneWidget);
+    expect(find.byKey(const Key('browse-map-north')), findsOneWidget);
+    expect(find.byKey(const Key('browse-map-zoom-in')), findsOneWidget);
+    expect(find.byKey(const Key('browse-map-zoom-out')), findsOneWidget);
+    expect(find.byType(Scalebar), findsOneWidget);
     expect(find.text('地図表示範囲 2件'), findsOneWidget);
     expect(find.text('座標あり 2件'), findsOneWidget);
     expect(find.text('座標なし 1件'), findsOneWidget);

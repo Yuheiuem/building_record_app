@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -191,6 +192,7 @@ class _BrowsePageState extends State<BrowsePage> {
       appBar: AuthenticatedAppBar(
         authService: widget.authService,
         title: '地図・一覧で見る',
+        showVersion: true,
       ),
       body: SafeArea(
         child: LayoutBuilder(
@@ -231,16 +233,19 @@ class _BrowsePageState extends State<BrowsePage> {
             );
 
             if (wideLayout) {
-              return Padding(
+              final double workspaceHeight = math.max(
+                680.0,
+                constraints.maxHeight - 32.0,
+              );
+
+              return SingleChildScrollView(
                 padding: pagePadding,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     toolbar,
                     const SizedBox(height: 12),
-                    Expanded(child: workspace),
-                    const SizedBox(height: 12),
-                    const AppVersionFooter(),
+                    SizedBox(height: workspaceHeight, child: workspace),
                   ],
                 ),
               );
@@ -254,8 +259,6 @@ class _BrowsePageState extends State<BrowsePage> {
                   toolbar,
                   const SizedBox(height: 12),
                   workspace,
-                  const SizedBox(height: 20),
-                  const AppVersionFooter(),
                   const SizedBox(height: 8),
                 ],
               ),
@@ -603,7 +606,7 @@ class _MapEmptyState extends StatelessWidget {
   }
 }
 
-class _BuildingMap extends StatelessWidget {
+class _BuildingMap extends StatefulWidget {
   const _BuildingMap({
     required this.allBuildings,
     required this.markerBuildings,
@@ -613,8 +616,6 @@ class _BuildingMap extends StatelessWidget {
     super.key,
   });
 
-  static const LatLng _fallbackCenter = LatLng(35.681236, 139.767125);
-
   final List<Building> allBuildings;
   final List<Building> markerBuildings;
   final bool showLabels;
@@ -622,8 +623,31 @@ class _BuildingMap extends StatelessWidget {
   final void Function(MapCamera camera, bool hasGesture) onPositionChanged;
 
   @override
+  State<_BuildingMap> createState() => _BuildingMapState();
+}
+
+class _BuildingMapState extends State<_BuildingMap> {
+  static const LatLng _fallbackCenter = LatLng(35.681236, 139.767125);
+  static const double _minZoom = 5;
+  static const double _maxZoom = 19;
+
+  final MapController _mapController = MapController();
+
+  void _changeZoom(double difference) {
+    final MapCamera camera = _mapController.camera;
+    final double nextZoom = (camera.zoom + difference)
+        .clamp(_minZoom, _maxZoom)
+        .toDouble();
+    _mapController.move(camera.center, nextZoom);
+  }
+
+  void _resetNorth() {
+    _mapController.rotate(0);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final List<LatLng> points = allBuildings
+    final List<LatLng> points = widget.allBuildings
         .map(
           (Building building) =>
               LatLng(building.latitude!, building.longitude!),
@@ -639,20 +663,25 @@ class _BuildingMap extends StatelessWidget {
             maxZoom: 17,
           )
         : null;
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
 
     return Stack(
       children: <Widget>[
         FlutterMap(
+          mapController: _mapController,
           options: MapOptions(
             initialCenter: initialCenter,
             initialZoom: points.length == 1 ? 16 : 11,
             initialCameraFit: initialCameraFit,
-            minZoom: 5,
-            maxZoom: 19,
-            onPositionChanged: onPositionChanged,
+            minZoom: _minZoom,
+            maxZoom: _maxZoom,
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+            ),
+            onPositionChanged: widget.onPositionChanged,
           ),
           children: <Widget>[
-            if (enableNetworkTiles)
+            if (widget.enableNetworkTiles)
               TileLayer(
                 urlTemplate:
                     'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
@@ -660,15 +689,28 @@ class _BuildingMap extends StatelessWidget {
                 userAgentPackageName: 'building_record_app',
               ),
             MarkerLayer(
-              markers: markerBuildings
+              markers: widget.markerBuildings
                   .map(
                     (Building building) => _buildingMarker(
                       context,
                       building,
-                      showLabels: showLabels,
+                      showLabels: widget.showLabels,
                     ),
                   )
                   .toList(growable: false),
+            ),
+            Scalebar(
+              alignment: Alignment.bottomLeft,
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 48),
+              length: ScalebarLength.m,
+              textStyle: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                shadows: const <Shadow>[
+                  Shadow(color: Colors.white, blurRadius: 4),
+                ],
+              ),
             ),
             const SimpleAttributionWidget(source: Text('国土地理院')),
           ],
@@ -679,9 +721,7 @@ class _BuildingMap extends StatelessWidget {
           child: IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.surface.withValues(alpha: 0.88),
+                color: colorScheme.surface.withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Padding(
@@ -689,6 +729,15 @@ class _BuildingMap extends StatelessWidget {
                 child: Text('ピンは選択せず、右の一覧から確認します。'),
               ),
             ),
+          ),
+        ),
+        Positioned(
+          right: 10,
+          top: 10,
+          child: _MapControlColumn(
+            onResetNorth: _resetNorth,
+            onZoomIn: () => _changeZoom(1),
+            onZoomOut: () => _changeZoom(-1),
           ),
         ),
       ],
@@ -748,6 +797,80 @@ class _BuildingMap extends StatelessWidget {
             pin,
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _MapControlColumn extends StatelessWidget {
+  const _MapControlColumn({
+    required this.onResetNorth,
+    required this.onZoomIn,
+    required this.onZoomOut,
+  });
+
+  final VoidCallback onResetNorth;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.94),
+      elevation: 2,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _MapControlButton(
+            key: const Key('browse-map-north'),
+            tooltip: '北を上に戻す',
+            onPressed: onResetNorth,
+            child: const Text(
+              'N',
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          const Divider(height: 1),
+          _MapControlButton(
+            key: const Key('browse-map-zoom-in'),
+            tooltip: '地図を拡大',
+            onPressed: onZoomIn,
+            child: const Icon(Icons.add),
+          ),
+          const Divider(height: 1),
+          _MapControlButton(
+            key: const Key('browse-map-zoom-out'),
+            tooltip: '地図を縮小',
+            onPressed: onZoomOut,
+            child: const Icon(Icons.remove),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapControlButton extends StatelessWidget {
+  const _MapControlButton({
+    required this.tooltip,
+    required this.onPressed,
+    required this.child,
+    super.key,
+  });
+
+  final String tooltip;
+  final VoidCallback onPressed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        child: SizedBox.square(dimension: 44, child: Center(child: child)),
       ),
     );
   }

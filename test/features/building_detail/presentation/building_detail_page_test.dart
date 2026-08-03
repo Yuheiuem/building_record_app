@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:building_record_app/core/config/app_config.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_detail_data.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
@@ -35,6 +36,7 @@ void main() {
     expect(apiService.detailCallCount, 1);
     expect(apiService.lastBuildingId, 'building-12345678');
     expect(find.text('テスト建物'), findsOneWidget);
+    expect(find.text(AppConfig.version), findsOneWidget);
     expect(find.text('東京都千代田区'), findsOneWidget);
     expect(find.text('設計第一部'), findsOneWidget);
     expect(find.text('設計研修'), findsOneWidget);

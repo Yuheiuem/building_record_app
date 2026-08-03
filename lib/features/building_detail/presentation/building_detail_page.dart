@@ -163,6 +163,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
       appBar: AuthenticatedAppBar(
         authService: widget.authService,
         title: '建物詳細',
+        showVersion: true,
       ),
       body: SafeArea(child: _buildBody(context)),
     );
@@ -228,8 +229,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                   ),
                   const SizedBox(height: 12),
                   _VisitHistorySection(detail: detail, tagsById: tagsById),
-                  const SizedBox(height: 20),
-                  const AppVersionFooter(),
+                  const SizedBox(height: 8),
                 ],
               ),
             ),
