@@ -26,6 +26,7 @@ class RecordPage extends StatefulWidget {
     this.locationService,
     this.tagApiService,
     this.recordSubmissionApiService,
+    this.initialExistingBuildingId,
     super.key,
   });
 
@@ -35,6 +36,7 @@ class RecordPage extends StatefulWidget {
   final RecordLocationService? locationService;
   final TagApiService? tagApiService;
   final RecordSubmissionApiService? recordSubmissionApiService;
+  final String? initialExistingBuildingId;
 
   @override
   State<RecordPage> createState() => _RecordPageState();
@@ -72,7 +74,27 @@ class _RecordPageState extends State<RecordPage> {
       tagApiService: _tagApiService,
       recordSubmissionApiService: _recordSubmissionApiService,
     );
-    unawaited(_controller.loadBootstrapData());
+    unawaited(_loadInitialData());
+  }
+
+  Future<void> _loadInitialData() async {
+    await _controller.loadBootstrapData();
+
+    if (!mounted) {
+      return;
+    }
+
+    final String? buildingId = widget.initialExistingBuildingId?.trim();
+
+    if (buildingId == null || buildingId.isEmpty) {
+      return;
+    }
+
+    _controller.selectExistingBuilding(buildingId);
+
+    if (_controller.selectedExistingBuilding != null) {
+      _controller.setBuildingMode(RecordBuildingMode.existingBuilding);
+    }
   }
 
   @override

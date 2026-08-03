@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
+import '../../../core/routing/app_routes.dart';
 import '../../../data/models/building.dart';
 import '../../../data/models/building_detail_data.dart';
 import '../../../data/models/building_tag.dart';
@@ -208,6 +210,15 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                     tagsById: tagsById,
                     enableNetworkTiles: widget.enableNetworkTiles,
                     onRefresh: _loadDetail,
+                    onRecordRevisit: () {
+                      unawaited(
+                        context.push<void>(
+                          AppRoutes.recordForBuilding(
+                            detail.building.buildingId,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   if (_errorMessage != null) ...<Widget>[
                     const SizedBox(height: 12),
@@ -253,7 +264,10 @@ class _BuildingOverviewSection extends StatelessWidget {
     required this.tagsById,
     required this.enableNetworkTiles,
     required this.onRefresh,
+    required this.onRecordRevisit,
   });
+
+  final VoidCallback onRecordRevisit;
 
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
@@ -271,6 +285,7 @@ class _BuildingOverviewSection extends StatelessWidget {
           detail: detail,
           tagsById: tagsById,
           onRefresh: onRefresh,
+          onRecordRevisit: onRecordRevisit,
         );
         final Widget map = _BuildingLocationCard(
           building: building,
@@ -306,8 +321,10 @@ class _BuildingInformationCard extends StatelessWidget {
     required this.detail,
     required this.tagsById,
     required this.onRefresh,
+    required this.onRecordRevisit,
   });
 
+  final VoidCallback onRecordRevisit;
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
   final Future<void> Function() onRefresh;
@@ -398,6 +415,13 @@ class _BuildingInformationCard extends StatelessWidget {
               title: '施工',
               tagIds: building.constructionTags,
               tagsById: tagsById,
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              key: const Key('record-building-revisit'),
+              onPressed: onRecordRevisit,
+              icon: const Icon(Icons.add_location_alt_outlined),
+              label: const Text('再訪を記録'),
             ),
           ],
         ),
