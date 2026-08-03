@@ -173,6 +173,18 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     });
   }
 
+  Future<void> _addPhotosToVisit(BuildingVisit visit) async {
+    final bool? changed = await context.push<bool>(
+      AppRoutes.addPhotosToVisit(widget.buildingId, visit.visitId),
+    );
+
+    if (!mounted || changed != true) {
+      return;
+    }
+
+    await _loadDetail();
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -338,6 +350,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                   _VisitHistorySection(
                     detail: detail,
                     tagsById: tagsById,
+                    onAddPhotos: _addPhotosToVisit,
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -975,10 +988,15 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
 }
 
 class _VisitHistorySection extends StatelessWidget {
-  const _VisitHistorySection({required this.detail, required this.tagsById});
+  const _VisitHistorySection({
+    required this.detail,
+    required this.tagsById,
+    required this.onAddPhotos,
+  });
 
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
+  final ValueChanged<BuildingVisit> onAddPhotos;
 
   @override
   Widget build(BuildContext context) {
@@ -1026,6 +1044,7 @@ class _VisitHistorySection extends StatelessWidget {
                     visit: visit,
                     photoCount: detail.photosForVisit(visit.visitId).length,
                     tagsById: tagsById,
+                    onAddPhotos: () => onAddPhotos(visit),
                   );
                 },
               ),
@@ -1041,11 +1060,13 @@ class _VisitCard extends StatelessWidget {
     required this.visit,
     required this.photoCount,
     required this.tagsById,
+    required this.onAddPhotos,
   });
 
   final BuildingVisit visit;
   final int photoCount;
   final Map<String, BuildingTag> tagsById;
+  final VoidCallback onAddPhotos;
 
   @override
   Widget build(BuildContext context) {
@@ -1125,6 +1146,18 @@ class _VisitCard extends StatelessWidget {
                   text: _locationSourceLabel(visit.locationSource),
                 ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              key: ValueKey<String>(
+                'add-photos-to-visit-${visit.visitId}',
+              ),
+              onPressed: onAddPhotos,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('写真を追加'),
+            ),
           ),
         ],
       ),

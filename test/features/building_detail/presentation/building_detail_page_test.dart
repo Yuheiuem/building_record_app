@@ -57,6 +57,14 @@ void main() {
       find.byKey(const Key('building-representative-location-chip')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(
+        const ValueKey<String>(
+          'add-photos-to-visit-visit-12345678',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(apiService.photoCallCount, 1);
 
     await tester.tap(

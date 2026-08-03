@@ -9,6 +9,7 @@ import '../../features/building_detail/presentation/building_detail_page.dart';
 import '../../features/diagnostics/presentation/diagnostics_page.dart';
 import '../../features/home/presentation/home_page.dart';
 import '../../features/record/presentation/record_page.dart';
+import '../../features/visit_photo_addition/presentation/visit_photo_addition_page.dart';
 import 'app_routes.dart';
 
 GoRouter createAppRouter({
@@ -85,6 +86,8 @@ GoRouter createAppRouter({
           return RecordPage(
             authService: authService,
             bootstrapApiService: bootstrapApiService,
+            initialExistingBuildingId:
+                state.uri.queryParameters['buildingId'],
           );
         },
       ),
@@ -103,6 +106,16 @@ GoRouter createAppRouter({
           return BuildingDetailPage(
             authService: authService,
             buildingId: state.pathParameters['buildingId']!,
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.visitPhotoAdditionPattern,
+        builder: (BuildContext context, GoRouterState state) {
+          return VisitPhotoAdditionPage(
+            authService: authService,
+            buildingId: state.pathParameters['buildingId']!,
+            visitId: state.pathParameters['visitId']!,
           );
         },
       ),
