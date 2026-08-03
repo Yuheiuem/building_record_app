@@ -5,6 +5,9 @@ import 'package:latlong2/latlong.dart';
 import '../../../core/config/app_config.dart';
 import '../../../data/models/record_draft_location.dart';
 
+import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+
 class MapLocationPickerPage extends StatefulWidget {
   const MapLocationPickerPage({
     this.initialLatitude,
@@ -69,8 +72,14 @@ class _MapLocationPickerPageState extends State<MapLocationPickerPage> {
                 options: MapOptions(
                   initialCenter: _center,
                   initialZoom: AppConfig.recordMapDefaultZoom,
+                  initialRotation: 0,
                   minZoom: 5,
                   maxZoom: 19,
+                  interactionOptions: InteractionOptions(
+                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                    cursorKeyboardRotationOptions:
+                        CursorKeyboardRotationOptions.disabled(),
+                  ),
                   onPositionChanged: _handlePositionChanged,
                 ),
                 children: <Widget>[

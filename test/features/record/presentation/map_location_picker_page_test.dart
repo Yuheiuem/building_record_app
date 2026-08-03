@@ -1,6 +1,8 @@
 import 'package:building_record_app/data/models/record_draft_location.dart';
 import 'package:building_record_app/features/record/presentation/map_location_picker_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -43,6 +45,18 @@ void main() {
     expect(find.byKey(const Key('map-center-crosshair')), findsOneWidget);
     expect(find.text('緯度 35.689592'), findsOneWidget);
     expect(find.text('経度 139.691712'), findsOneWidget);
+    final FlutterMap map = tester.widget<FlutterMap>(find.byType(FlutterMap));
+
+    expect(map.options.initialRotation, 0);
+    expect(
+      InteractiveFlag.hasRotate(map.options.interactionOptions.flags),
+      isFalse,
+    );
+    expect(
+      map.options.interactionOptions.cursorKeyboardRotationOptions.isKeyTrigger
+          ?.call(LogicalKeyboardKey.controlLeft),
+      isFalse,
+    );
 
     await tester.tap(find.byKey(const Key('confirm-map-location')));
     await tester.pumpAndSettle();
