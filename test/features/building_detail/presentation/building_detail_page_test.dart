@@ -56,7 +56,35 @@ void main() {
       find.byKey(const ValueKey<String>('add-photos-to-visit-visit-12345678')),
       findsOneWidget,
     );
+    expect(apiService.thumbnailCallCount, 4);
+    expect(apiService.photoCallCount, 0);
+    expect(find.byKey(const Key('show-all-building-photos')), findsOneWidget);
+    expect(find.byKey(const Key('open-building-drive-folder')), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('building-photo-photo-00000001')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
     expect(apiService.photoCallCount, 1);
+    expect(find.byType(InteractiveViewer), findsOneWidget);
+
+    await tester.tap(find.byTooltip('閉じる'));
+    await tester.pumpAndSettle();
+
+    await tester.ensureVisible(
+      find.byKey(const Key('show-all-building-photos')),
+    );
+    await tester.tap(find.byKey(const Key('show-all-building-photos')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(apiService.thumbnailCallCount, 6);
+    expect(
+      find.byKey(const ValueKey<String>('building-photo-photo-00000006')),
+      findsOneWidget,
+    );
 
     await tester.tap(
       find.byKey(const Key('building-representative-location-chip')),
@@ -108,6 +136,7 @@ class _FakeAuthService extends AuthService {
 
 class _FakeBuildingDetailApiService implements BuildingDetailApiService {
   int detailCallCount = 0;
+  int thumbnailCallCount = 0;
   int photoCallCount = 0;
   String? lastBuildingId;
 
@@ -136,7 +165,7 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
         designTags: const <String>['tag-design-1234'],
         salesTags: const <String>[],
         constructionTags: const <String>['tag-construction-1234'],
-        driveFolderId: null,
+        driveFolderId: 'drive-folder-12345678',
         coverPhotoId: 'photo-12345678',
         createdAt: null,
         updatedAt: null,
@@ -154,17 +183,18 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
           accuracyM: 8.5,
           locationSource: 'gps',
           status: 'completed',
-          expectedPhotoCount: 1,
+          expectedPhotoCount: 6,
           createdAt: null,
           updatedAt: null,
         ),
       ],
-      photos: <BuildingPhoto>[
-        BuildingPhoto(
-          photoId: 'photo-12345678',
+      photos: List<BuildingPhoto>.generate(6, (int index) {
+        final int number = index + 1;
+        return BuildingPhoto(
+          photoId: 'photo-${number.toString().padLeft(8, '0')}',
           buildingId: buildingId,
           visitId: 'visit-12345678',
-          fileName: 'photo-12345678.png',
+          fileName: 'photo-$number.png',
           mimeType: 'image/png',
           byteSize: _pngBytes.length,
           width: 1,
@@ -174,10 +204,10 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
           longitude: 139.7672,
           accuracyM: 8.5,
           locationSource: 'gps',
-          displayOrder: 1,
+          displayOrder: number,
           createdAt: null,
-        ),
-      ],
+        );
+      }),
       tags: const <BuildingTag>[
         BuildingTag(
           tagId: 'tag-design-1234',
@@ -210,7 +240,27 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
           updatedAt: null,
         ),
       ],
-      counts: const BuildingDetailCounts(visits: 1, photos: 1),
+      counts: const BuildingDetailCounts(visits: 1, photos: 6),
+    );
+  }
+
+  @override
+  Future<BuildingPhotoData> getPhotoThumbnailData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String photoId,
+  }) async {
+    thumbnailCallCount += 1;
+    return BuildingPhotoData(
+      requestId: requestId,
+      serverTime: DateTime.parse('2026-07-30T15:30:00+09:00'),
+      photoId: photoId,
+      fileName: '$photoId-thumbnail.png',
+      mimeType: 'image/png',
+      byteSize: _pngBytes.length,
+      bytes: _pngBytes,
+      stage: '5-2B',
     );
   }
 

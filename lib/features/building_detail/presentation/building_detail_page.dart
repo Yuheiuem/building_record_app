@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
@@ -39,15 +41,20 @@ class BuildingDetailPage extends StatefulWidget {
 }
 
 class _BuildingDetailPageState extends State<BuildingDetailPage> {
-  static const int _initialPhotoLimit = 12;
+  static const int _initialPhotoLimit = 4;
 
   late final BuildingDetailApiService _apiService;
   late final bool _ownsApiService;
   late final BuildingLocationApiService _locationApiService;
   late final bool _ownsLocationApiService;
 
-  final Map<String, Future<BuildingPhotoData>> _photoFutures =
+  final Map<String, Future<BuildingPhotoData>> _thumbnailFutures =
       <String, Future<BuildingPhotoData>>{};
+  final Map<String, Future<BuildingPhotoData>> _fullPhotoFutures =
+      <String, Future<BuildingPhotoData>>{};
+  final _AsyncRequestLimiter _thumbnailRequestLimiter = _AsyncRequestLimiter(
+    maxConcurrent: 4,
+  );
 
   BuildingDetailData? _detail;
   String? _errorMessage;
@@ -73,7 +80,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   void didUpdateWidget(BuildingDetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.buildingId != widget.buildingId) {
-      _photoFutures.clear();
+      _thumbnailFutures.clear();
+      _fullPhotoFutures.clear();
       _visiblePhotoLimit = _initialPhotoLimit;
       _detail = null;
       _errorMessage = null;
@@ -125,7 +133,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
 
       setState(() {
         _detail = result;
-        _photoFutures.clear();
+        _thumbnailFutures.clear();
+        _fullPhotoFutures.clear();
         _visiblePhotoLimit = _initialPhotoLimit;
         _isLoading = false;
       });
@@ -148,8 +157,28 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
   }
 
-  Future<BuildingPhotoData> _photoFuture(BuildingPhoto photo) {
-    return _photoFutures.putIfAbsent(photo.photoId, () {
+  Future<BuildingPhotoData> _thumbnailFuture(BuildingPhoto photo) {
+    return _thumbnailFutures.putIfAbsent(photo.photoId, () {
+      final String? idToken = widget.authService.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        return Future<BuildingPhotoData>.error(
+          const BuildingDetailApiException('Googleログイン情報を取得できませんでした。'),
+        );
+      }
+
+      return _thumbnailRequestLimiter.schedule<BuildingPhotoData>(() {
+        return _apiService.getPhotoThumbnailData(
+          requestId: const Uuid().v4(),
+          clientVersion: AppConfig.version,
+          idToken: idToken,
+          photoId: photo.photoId,
+        );
+      });
+    });
+  }
+
+  Future<BuildingPhotoData> _fullPhotoFuture(BuildingPhoto photo) {
+    return _fullPhotoFutures.putIfAbsent(photo.photoId, () {
       final String? idToken = widget.authService.idToken;
       if (idToken == null || idToken.isEmpty) {
         return Future<BuildingPhotoData>.error(
@@ -166,10 +195,53 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     });
   }
 
-  void _retryPhoto(BuildingPhoto photo) {
+  void _retryThumbnail(BuildingPhoto photo) {
     setState(() {
-      _photoFutures.remove(photo.photoId);
+      _thumbnailFutures.remove(photo.photoId);
     });
+  }
+
+  void _retryFullPhoto(BuildingPhoto photo) {
+    _fullPhotoFutures.remove(photo.photoId);
+  }
+
+  void _openPhoto(BuildingPhoto photo) {
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return _FullPhotoDialog(
+          photo: photo,
+          loadPhoto: () => _fullPhotoFuture(photo),
+          onRetry: () => _retryFullPhoto(photo),
+        );
+      },
+    );
+  }
+
+  Future<void> _openDriveFolder(String folderId) async {
+    final Uri folderUri = Uri.https(
+      'drive.google.com',
+      '/drive/folders/$folderId',
+    );
+
+    try {
+      final bool launched = await launchUrl(
+        folderUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Google Driveを開けませんでした。')));
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Google Driveを開けませんでした。')));
+    }
   }
 
   Future<void> _addPhotosToVisit(BuildingVisit visit) async {
@@ -335,15 +407,23 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                   _PhotoGallerySection(
                     allPhotoCount: detail.photos.length,
                     photos: shownPhotos,
-                    photoFuture: _photoFuture,
-                    onRetryPhoto: _retryPhoto,
+                    thumbnailFuture: _thumbnailFuture,
+                    onRetryThumbnail: _retryThumbnail,
+                    onOpenPhoto: _openPhoto,
                     onShowMore: shownPhotoCount < detail.photos.length
                         ? () {
                             setState(() {
-                              _visiblePhotoLimit += _initialPhotoLimit;
+                              _visiblePhotoLimit = detail.photos.length;
                             });
                           }
                         : null,
+                    onOpenDrive: detail.building.driveFolderId == null
+                        ? null
+                        : () {
+                            unawaited(
+                              _openDriveFolder(detail.building.driveFolderId!),
+                            );
+                          },
                   ),
                   const SizedBox(height: 12),
                   _VisitHistorySection(
@@ -732,16 +812,20 @@ class _PhotoGallerySection extends StatelessWidget {
   const _PhotoGallerySection({
     required this.allPhotoCount,
     required this.photos,
-    required this.photoFuture,
-    required this.onRetryPhoto,
+    required this.thumbnailFuture,
+    required this.onRetryThumbnail,
+    required this.onOpenPhoto,
     required this.onShowMore,
+    required this.onOpenDrive,
   });
 
   final int allPhotoCount;
   final List<BuildingPhoto> photos;
-  final Future<BuildingPhotoData> Function(BuildingPhoto photo) photoFuture;
-  final ValueChanged<BuildingPhoto> onRetryPhoto;
+  final Future<BuildingPhotoData> Function(BuildingPhoto photo) thumbnailFuture;
+  final ValueChanged<BuildingPhoto> onRetryThumbnail;
+  final ValueChanged<BuildingPhoto> onOpenPhoto;
   final VoidCallback? onShowMore;
+  final VoidCallback? onOpenDrive;
 
   @override
   Widget build(BuildContext context) {
@@ -792,17 +876,28 @@ class _PhotoGallerySection extends StatelessWidget {
                   return _AuthenticatedPhotoTile(
                     key: ValueKey<String>('building-photo-${photo.photoId}'),
                     photo: photo,
-                    future: photoFuture(photo),
-                    onRetry: () => onRetryPhoto(photo),
+                    thumbnailFuture: thumbnailFuture(photo),
+                    onRetry: () => onRetryThumbnail(photo),
+                    onOpen: () => onOpenPhoto(photo),
                   );
                 },
               ),
             if (onShowMore != null) ...<Widget>[
               const SizedBox(height: 12),
               OutlinedButton.icon(
+                key: const Key('show-all-building-photos'),
                 onPressed: onShowMore,
                 icon: const Icon(Icons.expand_more),
-                label: Text('さらに表示（残り${allPhotoCount - photos.length}枚）'),
+                label: Text('すべて表示（残り${allPhotoCount - photos.length}枚）'),
+              ),
+            ],
+            if (onOpenDrive != null) ...<Widget>[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('open-building-drive-folder'),
+                onPressed: onOpenDrive,
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Google Driveで写真フォルダを開く'),
               ),
             ],
           ],
@@ -815,19 +910,21 @@ class _PhotoGallerySection extends StatelessWidget {
 class _AuthenticatedPhotoTile extends StatelessWidget {
   const _AuthenticatedPhotoTile({
     required this.photo,
-    required this.future,
+    required this.thumbnailFuture,
     required this.onRetry,
+    required this.onOpen,
     super.key,
   });
 
   final BuildingPhoto photo;
-  final Future<BuildingPhotoData> future;
+  final Future<BuildingPhotoData> thumbnailFuture;
   final VoidCallback onRetry;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<BuildingPhotoData>(
-      future: future,
+      future: thumbnailFuture,
       builder:
           (BuildContext context, AsyncSnapshot<BuildingPhotoData> snapshot) {
             if (snapshot.hasData) {
@@ -842,7 +939,7 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
                   ),
                 ),
                 child: InkWell(
-                  onTap: () => _showPhotoDialog(context, photo, data),
+                  onTap: onOpen,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
@@ -926,58 +1023,128 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
           },
     );
   }
+}
 
-  void _showPhotoDialog(
-    BuildContext context,
-    BuildingPhoto photo,
-    BuildingPhotoData data,
-  ) {
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return Dialog.fullscreen(
-          child: Scaffold(
-            appBar: AppBar(
-              title: const Text('写真'),
-              leading: IconButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                icon: const Icon(Icons.close),
-                tooltip: '閉じる',
-              ),
-            ),
-            body: Column(
-              children: <Widget>[
-                Expanded(
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: Center(
-                      child: InteractiveViewer(
-                        minScale: 0.5,
-                        maxScale: 5,
-                        child: Image.memory(data.bytes, fit: BoxFit.contain),
+class _FullPhotoDialog extends StatefulWidget {
+  const _FullPhotoDialog({
+    required this.photo,
+    required this.loadPhoto,
+    required this.onRetry,
+  });
+
+  final BuildingPhoto photo;
+  final Future<BuildingPhotoData> Function() loadPhoto;
+  final VoidCallback onRetry;
+
+  @override
+  State<_FullPhotoDialog> createState() => _FullPhotoDialogState();
+}
+
+class _FullPhotoDialogState extends State<_FullPhotoDialog> {
+  late Future<BuildingPhotoData> _photoFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _photoFuture = widget.loadPhoto();
+  }
+
+  void _retry() {
+    widget.onRetry();
+    setState(() {
+      _photoFuture = widget.loadPhoto();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('写真'),
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+            tooltip: '閉じる',
+          ),
+        ),
+        body: FutureBuilder<BuildingPhotoData>(
+          future: _photoFuture,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<BuildingPhotoData> snapshot,
+              ) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const Icon(Icons.broken_image, size: 52),
+                          const SizedBox(height: 12),
+                          const Text('元の写真を取得できませんでした。'),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _retry,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('再試行'),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Wrap(
-                    spacing: 14,
-                    runSpacing: 6,
-                    alignment: WrapAlignment.center,
-                    children: <Widget>[
-                      Text(_formatDateTime(photo.takenAt ?? photo.createdAt)),
-                      Text(_formatBytes(photo.byteSize)),
-                      if (photo.width != null && photo.height != null)
-                        Text('${photo.width} × ${photo.height}'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+                  );
+                }
+
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final BuildingPhotoData data = snapshot.data!;
+                return Column(
+                  children: <Widget>[
+                    Expanded(
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: Center(
+                          child: InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 5,
+                            child: Image.memory(
+                              data.bytes,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Wrap(
+                        spacing: 14,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: <Widget>[
+                          Text(
+                            _formatDateTime(
+                              widget.photo.takenAt ?? widget.photo.createdAt,
+                            ),
+                          ),
+                          Text(_formatBytes(widget.photo.byteSize)),
+                          if (widget.photo.width != null &&
+                              widget.photo.height != null)
+                            Text(
+                              '${widget.photo.width} × ${widget.photo.height}',
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+        ),
+      ),
     );
   }
 }
@@ -1254,6 +1421,42 @@ class _InlineErrorMessage extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _AsyncRequestLimiter {
+  _AsyncRequestLimiter({required this.maxConcurrent})
+    : assert(maxConcurrent > 0);
+
+  final int maxConcurrent;
+  final Queue<Future<void> Function()> _queue =
+      Queue<Future<void> Function()>();
+  int _activeCount = 0;
+
+  Future<T> schedule<T>(Future<T> Function() action) {
+    final Completer<T> completer = Completer<T>();
+    _queue.add(() async {
+      try {
+        completer.complete(await action());
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    _drain();
+    return completer.future;
+  }
+
+  void _drain() {
+    while (_activeCount < maxConcurrent && _queue.isNotEmpty) {
+      final Future<void> Function() task = _queue.removeFirst();
+      _activeCount += 1;
+      unawaited(
+        task().whenComplete(() {
+          _activeCount -= 1;
+          _drain();
+        }),
+      );
+    }
   }
 }
 

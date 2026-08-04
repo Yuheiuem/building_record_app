@@ -14,6 +14,13 @@ abstract interface class BuildingDetailApiService {
     required String buildingId,
   });
 
+  Future<BuildingPhotoData> getPhotoThumbnailData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String photoId,
+  });
+
   Future<BuildingPhotoData> getPhotoData({
     required String requestId,
     required String clientVersion,
@@ -56,14 +63,49 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
   }
 
   @override
+  Future<BuildingPhotoData> getPhotoThumbnailData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String photoId,
+  }) async {
+    return _getPhotoDataByAction(
+      action: 'getPhotoThumbnailData',
+      requestId: requestId,
+      clientVersion: clientVersion,
+      idToken: idToken,
+      photoId: photoId,
+      responseLabel: 'サムネイル',
+    );
+  }
+
+  @override
   Future<BuildingPhotoData> getPhotoData({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String photoId,
   }) async {
-    final Map<String, dynamic> response = await _post(
+    return _getPhotoDataByAction(
       action: 'getPhotoData',
+      requestId: requestId,
+      clientVersion: clientVersion,
+      idToken: idToken,
+      photoId: photoId,
+      responseLabel: '写真データ',
+    );
+  }
+
+  Future<BuildingPhotoData> _getPhotoDataByAction({
+    required String action,
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String photoId,
+    required String responseLabel,
+  }) async {
+    final Map<String, dynamic> response = await _post(
+      action: action,
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
@@ -72,7 +114,9 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
     try {
       return BuildingPhotoData.fromJson(response);
     } on FormatException catch (error) {
-      throw BuildingDetailApiException('写真データの応答を読み取れませんでした。${error.message}');
+      throw BuildingDetailApiException(
+        '$responseLabelの応答を読み取れませんでした。${error.message}',
+      );
     }
   }
 
@@ -90,7 +134,6 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
       'clientVersion': clientVersion,
       'payload': payload,
     });
-
     try {
       final http.Response response = await _client
           .post(
@@ -101,7 +144,6 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
             body: requestBody,
           )
           .timeout(_requestTimeout);
-
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw BuildingDetailApiException(
           'Apps ScriptがHTTP ${response.statusCode}を返しました。',
@@ -115,14 +157,12 @@ class HttpBuildingDetailApiService implements BuildingDetailApiService {
           'Apps Scriptの応答がJSONオブジェクトではありません。',
         );
       }
-
       if (decoded['ok'] != true) {
         throw BuildingDetailApiException(
           _optionalString(decoded['message']) ?? 'データを取得できませんでした。',
           errorCode: _optionalString(decoded['errorCode']),
         );
       }
-
       return decoded;
     } on TimeoutException {
       throw const BuildingDetailApiException('Apps Scriptから時間内に応答がありませんでした。');

@@ -60,6 +60,12 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'getPhotoThumbnailData':
+        return handleGetPhotoThumbnailData(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'updateBuildingLocation':
         return handleUpdateBuildingLocation(
           requestId,
@@ -129,7 +135,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '5-1B',
+      stage: '5-2B',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'

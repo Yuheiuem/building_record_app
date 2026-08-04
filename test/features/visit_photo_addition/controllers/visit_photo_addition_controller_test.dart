@@ -210,6 +210,16 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
   }
 
   @override
+  Future<BuildingPhotoData> getPhotoThumbnailData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String photoId,
+  }) {
+    throw UnimplementedError();
+  }
+
+  @override
   Future<BuildingPhotoData> getPhotoData({
     required String requestId,
     required String clientVersion,
