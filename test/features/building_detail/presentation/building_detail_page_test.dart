@@ -86,9 +86,12 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(
-      find.byKey(const Key('building-representative-location-chip')),
+    final Finder representativeLocationChip = find.byKey(
+      const Key('building-representative-location-chip'),
     );
+    await tester.ensureVisible(representativeLocationChip);
+    await tester.pumpAndSettle();
+    await tester.tap(representativeLocationChip);
     await tester.pumpAndSettle();
 
     expect(find.text('地図で位置を指定'), findsOneWidget);
@@ -105,7 +108,12 @@ void main() {
     expect(apiService.detailCallCount, 2);
     expect(find.text('建物の代表位置を更新しました。'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('refresh-building-detail')));
+    final Finder refreshButton = find.byKey(
+      const Key('refresh-building-detail'),
+    );
+    await tester.ensureVisible(refreshButton);
+    await tester.pumpAndSettle();
+    await tester.tap(refreshButton);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
