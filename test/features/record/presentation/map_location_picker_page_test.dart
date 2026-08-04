@@ -6,9 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('初期座標がある場合は代表座標を中心にし現在地を取得しない', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('初期座標がある場合は代表座標を中心にし現在地を取得しない', (WidgetTester tester) async {
     final _FakeRecordLocationService locationService =
         _FakeRecordLocationService(
           RecordDraftLocation(
@@ -77,9 +75,7 @@ void main() {
     expect(selectedLocation!.source, RecordLocationSource.manual);
   });
 
-  testWidgets('初期座標がない場合は現在地を中心に表示する', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('初期座標がない場合は現在地を中心に表示する', (WidgetTester tester) async {
     final _FakeRecordLocationService locationService =
         _FakeRecordLocationService(
           RecordDraftLocation(
@@ -128,10 +124,7 @@ void main() {
     expect(locationService.callCount, 1);
     expect(find.text('緯度 35.700001'), findsOneWidget);
     expect(find.text('経度 139.700002'), findsOneWidget);
-    expect(
-      find.byKey(const Key('map-current-location-loading')),
-      findsNothing,
-    );
+    expect(find.byKey(const Key('map-current-location-loading')), findsNothing);
 
     await tester.tap(find.byKey(const Key('confirm-map-location')));
     await tester.pumpAndSettle();

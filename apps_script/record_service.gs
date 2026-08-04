@@ -1,4 +1,8 @@
 var RECORD_MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+var RECORD_MAX_THUMBNAIL_BYTES = 512 * 1024;
+var RECORD_THUMBNAIL_MIME_TYPE = 'image/jpeg';
+var RECORD_THUMBNAIL_ROOT_FOLDER_NAME = '_thumbnails';
+var RECORD_THUMBNAIL_FOLDER_CACHE_PREFIX = 'record-thumbnail-folder:';
 var RECORD_ALLOWED_MIME_TYPES = {
   'image/jpeg': '.jpg',
   'image/png': '.png'
@@ -54,7 +58,7 @@ function handleBeginRecord(requestId, payload, authContext) {
       buildingCreated: buildingResult.created,
       visitCreated: visitResult.created,
       reused: false,
-      stage: '4-2.2'
+      stage: '5-2A'
     };
 
     appendRequestResult_(
@@ -91,6 +95,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
   var timings = createRecordUploadTimings_(authContext);
   var normalized = normalizeUploadPhotoPayload_(requestId, payload);
   var bytes = decodeRecordPhotoBytes_(normalized, timings);
+  var thumbnailBytes = decodeRecordThumbnailBytes_(normalized, timings);
 
   if (
     normalized.recordDraft !== null ||
@@ -100,6 +105,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
       requestId,
       normalized,
       bytes,
+      thumbnailBytes,
       authContext,
       timings,
       handlerStartedAt
@@ -110,6 +116,7 @@ function handleUploadPhoto(requestId, payload, authContext) {
     requestId,
     normalized,
     bytes,
+    thumbnailBytes,
     authContext,
     timings,
     handlerStartedAt
@@ -123,7 +130,9 @@ function createRecordUploadTimings_(authContext) {
     draftPreparationMs: 0,
     lookupMs: 0,
     base64DecodeMs: 0,
+    thumbnailBase64DecodeMs: 0,
     driveSaveMs: 0,
+    thumbnailDriveSaveMs: 0,
     sheetWriteMs: 0,
     finalizeMs: 0
   };
@@ -157,10 +166,37 @@ function decodeRecordPhotoBytes_(normalized, timings) {
   return bytes;
 }
 
+
+function decodeRecordThumbnailBytes_(normalized, timings) {
+  if (
+    normalized.thumbnailBase64Data === null ||
+    normalized.thumbnailByteSize === null
+  ) {
+    return null;
+  }
+
+  var decodeStartedAt = Date.now();
+  try {
+    var bytes = Utilities.base64Decode(normalized.thumbnailBase64Data);
+    timings.thumbnailBase64DecodeMs = Date.now() - decodeStartedAt;
+    if (
+      bytes.length !== normalized.thumbnailByteSize ||
+      bytes.length > RECORD_MAX_THUMBNAIL_BYTES
+    ) {
+      return null;
+    }
+    return bytes;
+  } catch (error) {
+    timings.thumbnailBase64DecodeMs = Date.now() - decodeStartedAt;
+    return null;
+  }
+}
+
 function handleUploadPhotoLegacy_(
   requestId,
   normalized,
   bytes,
+  thumbnailBytes,
   authContext,
   timings,
   handlerStartedAt
@@ -235,7 +271,38 @@ function handleUploadPhotoLegacy_(
     var result;
     if (existingPhoto !== null) {
       validateExistingPhotoRecord_(existingPhoto, normalized);
+      var existingThumbnailFileId = optionalSheetString_(
+        existingPhoto.object.thumbnailFileId
+      );
+      var existingThumbnailSave = createEmptyThumbnailSaveResult_();
+      if (existingThumbnailFileId === null && thumbnailBytes !== null) {
+        var existingThumbnailStartedAt = Date.now();
+        existingThumbnailSave = saveRecordThumbnailSafely_(
+          normalized,
+          thumbnailBytes,
+          true
+        );
+        timings.thumbnailDriveSaveMs += Date.now()
+          - existingThumbnailStartedAt;
+        if (existingThumbnailSave.fileId !== null) {
+          var existingPhotoValues = existingPhoto.values.slice();
+          existingPhotoValues[5] = existingThumbnailSave.fileId;
+          var existingThumbnailWriteStartedAt = Date.now();
+          updateSheetRecord_(
+            spreadsheet,
+            'Photos',
+            existingPhoto.rowNumber,
+            existingPhotoValues
+          );
+          timings.sheetWriteMs += Date.now()
+            - existingThumbnailWriteStartedAt;
+          existingPhoto.values = existingPhotoValues;
+          existingPhoto.object.thumbnailFileId =
+            existingThumbnailSave.fileId;
+        }
+      }
       result = photoResultFromSheetRecord_(existingPhoto, true);
+      attachThumbnailSaveStatus_(result, existingThumbnailSave);
     } else {
       var driveStartedAt = Date.now();
       var buildingFolder = getRecordBuildingFolder_(
@@ -265,9 +332,18 @@ function handleUploadPhotoLegacy_(
       }
       timings.driveSaveMs = Date.now() - driveStartedAt;
 
+      var thumbnailStartedAt = Date.now();
+      var thumbnailSave = saveRecordThumbnailSafely_(
+        normalized,
+        thumbnailBytes,
+        true
+      );
+      timings.thumbnailDriveSaveMs += Date.now() - thumbnailStartedAt;
+
       var photoRow = createRecordPhotoRow_(
         normalized,
         file.getId(),
+        thumbnailSave.fileId,
         internalFileName,
         bytes.length
       );
@@ -279,10 +355,12 @@ function handleUploadPhotoLegacy_(
       result = createRecordPhotoUploadResult_(
         normalized,
         file.getId(),
+        thumbnailSave.fileId,
         bytes.length,
         reusedFile,
         'combined_photo_step'
       );
+      attachThumbnailSaveStatus_(result, thumbnailSave);
     }
 
     result.buildingId = normalized.buildingId;
@@ -346,6 +424,7 @@ function handleUploadPhotoParallelStep_(
   requestId,
   normalized,
   bytes,
+  thumbnailBytes,
   authContext,
   timings,
   handlerStartedAt
@@ -410,6 +489,14 @@ function handleUploadPhotoParallelStep_(
   }
   timings.driveSaveMs = Date.now() - driveStartedAt;
 
+  var thumbnailStartedAt = Date.now();
+  var thumbnailSave = saveRecordThumbnailSafely_(
+    normalized,
+    thumbnailBytes,
+    false
+  );
+  timings.thumbnailDriveSaveMs += Date.now() - thumbnailStartedAt;
+
   var spreadsheet = getDataSpreadsheet_();
   var lock = LockService.getScriptLock();
   var lockStartedAt = Date.now();
@@ -429,7 +516,6 @@ function handleUploadPhotoParallelStep_(
     var result;
     if (existingPhoto !== null) {
       validateExistingPhotoRecord_(existingPhoto, normalized);
-      result = photoResultFromSheetRecord_(existingPhoto, true);
       if (
         createdFile &&
         String(existingPhoto.object.storageFileId) !== file.getId()
@@ -440,10 +526,42 @@ function handleUploadPhotoParallelStep_(
           // 再送競合で作成した重複ファイルを削除できなくても記録は維持する。
         }
       }
+
+      var storedThumbnailFileId = optionalSheetString_(
+        existingPhoto.object.thumbnailFileId
+      );
+      if (
+        storedThumbnailFileId !== null &&
+        thumbnailSave.created &&
+        thumbnailSave.fileId !== storedThumbnailFileId
+      ) {
+        trashRecordThumbnailFile_(thumbnailSave.fileId);
+      } else if (
+        storedThumbnailFileId === null &&
+        thumbnailSave.fileId !== null
+      ) {
+        var existingPhotoValues = existingPhoto.values.slice();
+        existingPhotoValues[5] = thumbnailSave.fileId;
+        var existingThumbnailWriteStartedAt = Date.now();
+        updateSheetRecord_(
+          spreadsheet,
+          'Photos',
+          existingPhoto.rowNumber,
+          existingPhotoValues
+        );
+        timings.sheetWriteMs += Date.now()
+          - existingThumbnailWriteStartedAt;
+        existingPhoto.values = existingPhotoValues;
+        existingPhoto.object.thumbnailFileId = thumbnailSave.fileId;
+      }
+
+      result = photoResultFromSheetRecord_(existingPhoto, true);
+      attachThumbnailSaveStatus_(result, thumbnailSave);
     } else {
       var photoRow = createRecordPhotoRow_(
         normalized,
         file.getId(),
+        thumbnailSave.fileId,
         internalFileName,
         bytes.length
       );
@@ -453,10 +571,12 @@ function handleUploadPhotoParallelStep_(
       result = createRecordPhotoUploadResult_(
         normalized,
         file.getId(),
+        thumbnailSave.fileId,
         bytes.length,
         reusedFile,
         'parallel_photo_step'
       );
+      attachThumbnailSaveStatus_(result, thumbnailSave);
     }
 
     result.buildingId = normalized.buildingId;
@@ -484,6 +604,7 @@ function handleUploadPhotoParallelStep_(
 function createRecordPhotoRow_(
   normalized,
   storageFileId,
+  thumbnailFileId,
   internalFileName,
   byteSize
 ) {
@@ -493,7 +614,7 @@ function createRecordPhotoRow_(
     normalized.visitId,
     'google_drive',
     storageFileId,
-    '',
+    thumbnailFileId || '',
     internalFileName,
     normalized.mimeType,
     byteSize,
@@ -513,6 +634,7 @@ function createRecordPhotoRow_(
 function createRecordPhotoUploadResult_(
   normalized,
   storageFileId,
+  thumbnailFileId,
   byteSize,
   reused,
   saveMode
@@ -520,12 +642,102 @@ function createRecordPhotoUploadResult_(
   return {
     photoId: normalized.photoId,
     storageFileId: storageFileId,
+    thumbnailFileId: thumbnailFileId || null,
+    thumbnailSaved: thumbnailFileId !== null,
     byteSize: byteSize,
     displayOrder: normalized.displayOrder,
     reused: reused,
-    stage: '4-2.2',
+    stage: '5-2A',
     saveMode: saveMode
   };
+}
+
+
+function createEmptyThumbnailSaveResult_() {
+  return {
+    fileId: null,
+    reused: false,
+    created: false,
+    warning: null
+  };
+}
+
+function attachThumbnailSaveStatus_(result, thumbnailSave) {
+  if (!result || !thumbnailSave) {
+    return;
+  }
+  if (thumbnailSave.warning !== null) {
+    result.thumbnailWarning = thumbnailSave.warning;
+  }
+  if (result.thumbnailFileId === undefined) {
+    result.thumbnailFileId = thumbnailSave.fileId;
+    result.thumbnailSaved = thumbnailSave.fileId !== null;
+  }
+}
+
+function saveRecordThumbnailSafely_(
+  normalized,
+  thumbnailBytes,
+  lockAlreadyHeld
+) {
+  if (thumbnailBytes === null) {
+    return createEmptyThumbnailSaveResult_();
+  }
+
+  try {
+    var folder = getRecordBuildingThumbnailFolder_(
+      normalized.buildingId,
+      lockAlreadyHeld
+    );
+    var internalFileName = normalized.photoId + '.jpg';
+    var files = folder.getFilesByName(internalFileName);
+    var file;
+    var reused = false;
+    var created = false;
+    if (files.hasNext()) {
+      file = files.next();
+      reused = true;
+    } else {
+      file = folder.createFile(
+        Utilities.newBlob(
+          thumbnailBytes,
+          RECORD_THUMBNAIL_MIME_TYPE,
+          internalFileName
+        )
+      );
+      file.setDescription(
+        'Building record thumbnail. photoId=' + normalized.photoId
+      );
+      created = true;
+    }
+    return {
+      fileId: file.getId(),
+      reused: reused,
+      created: created,
+      warning: null
+    };
+  } catch (error) {
+    console.error(
+      'Thumbnail save failed. photoId=' + normalized.photoId + ' ' + error
+    );
+    return {
+      fileId: null,
+      reused: false,
+      created: false,
+      warning: 'サムネイルを保存できませんでした。'
+    };
+  }
+}
+
+function trashRecordThumbnailFile_(fileId) {
+  if (!fileId) {
+    return;
+  }
+  try {
+    DriveApp.getFileById(fileId).setTrashed(true);
+  } catch (ignore) {
+    // 再送競合で作成した重複サムネイルを削除できなくても記録は維持する。
+  }
 }
 
 function recordUploadContextCacheKey_(buildingId, visitId) {
@@ -740,7 +952,13 @@ function attachUploadPerformance_(
     draftPreparationMs: Number(timings.draftPreparationMs) || 0,
     lookupMs: Number(timings.lookupMs) || 0,
     base64DecodeMs: Number(timings.base64DecodeMs) || 0,
+    thumbnailBase64DecodeMs: Number(
+      timings.thumbnailBase64DecodeMs
+    ) || 0,
     driveSaveMs: Number(timings.driveSaveMs) || 0,
+    thumbnailDriveSaveMs: Number(
+      timings.thumbnailDriveSaveMs
+    ) || 0,
     sheetWriteMs: Number(timings.sheetWriteMs) || 0,
     finalizeMs: Number(timings.finalizeMs) || 0,
     handlerTotalMs: Date.now() - handlerStartedAt
@@ -842,7 +1060,7 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       photoCount: photos.length,
       status: 'completed',
       reused: false,
-      stage: '4-2.2'
+      stage: '5-2A'
     };
 
     appendRequestResult_(
@@ -976,6 +1194,8 @@ function normalizeUploadPhotoPayload_(requestId, payload) {
     );
   }
 
+  var thumbnail = normalizeOptionalRecordThumbnailPayload_(safe);
+
   return {
     requestId: requireRecordRequestId_(requestId),
     buildingId: requireRecordId_(safe.buildingId, 'buildingId'),
@@ -985,6 +1205,11 @@ function normalizeUploadPhotoPayload_(requestId, payload) {
     mimeType: mimeType,
     byteSize: byteSize,
     base64Data: requireRecordString_(safe, 'base64Data'),
+    thumbnailMimeType: thumbnail === null ? null : thumbnail.mimeType,
+    thumbnailByteSize: thumbnail === null ? null : thumbnail.byteSize,
+    thumbnailBase64Data: thumbnail === null
+      ? null
+      : thumbnail.base64Data,
     takenAt: requireIsoDate_(safe.takenAt, 'takenAt'),
     latitude: requireLatitude_(safe.latitude),
     longitude: requireLongitude_(safe.longitude),
@@ -996,6 +1221,38 @@ function normalizeUploadPhotoPayload_(requestId, payload) {
     ),
     recordDraft: recordDraft,
     finalizeAfterUpload: safe.finalizeAfterUpload === true
+  };
+}
+
+
+function normalizeOptionalRecordThumbnailPayload_(safe) {
+  var mimeType = getOptionalString(safe.thumbnailMimeType);
+  var base64Data = getOptionalString(safe.thumbnailBase64Data);
+  var byteSize = Number(safe.thumbnailByteSize);
+
+  if (
+    mimeType === null &&
+    base64Data === null &&
+    (safe.thumbnailByteSize === null ||
+      safe.thumbnailByteSize === undefined)
+  ) {
+    return null;
+  }
+
+  if (
+    mimeType !== RECORD_THUMBNAIL_MIME_TYPE ||
+    base64Data === null ||
+    !Number.isInteger(byteSize) ||
+    byteSize <= 0 ||
+    byteSize > RECORD_MAX_THUMBNAIL_BYTES
+  ) {
+    return null;
+  }
+
+  return {
+    mimeType: mimeType,
+    byteSize: byteSize,
+    base64Data: base64Data
   };
 }
 
@@ -1224,6 +1481,78 @@ function createRecordBuildingFolder_(buildingId) {
   return root.createFolder(buildingId);
 }
 
+
+function recordThumbnailFolderCacheKey_(buildingId) {
+  return RECORD_THUMBNAIL_FOLDER_CACHE_PREFIX + buildingId;
+}
+
+function getRecordBuildingThumbnailFolder_(buildingId, lockAlreadyHeld) {
+  var cache = CacheService.getScriptCache();
+  var cacheKey = recordThumbnailFolderCacheKey_(buildingId);
+  var cachedFolderId = cache.get(cacheKey);
+  if (cachedFolderId !== null) {
+    try {
+      return DriveApp.getFolderById(cachedFolderId);
+    } catch (ignore) {
+      cache.remove(cacheKey);
+    }
+  }
+
+  if (lockAlreadyHeld) {
+    return createRecordBuildingThumbnailFolderUnlocked_(
+      buildingId,
+      cache,
+      cacheKey
+    );
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    cachedFolderId = cache.get(cacheKey);
+    if (cachedFolderId !== null) {
+      try {
+        return DriveApp.getFolderById(cachedFolderId);
+      } catch (ignoreAgain) {
+        cache.remove(cacheKey);
+      }
+    }
+    return createRecordBuildingThumbnailFolderUnlocked_(
+      buildingId,
+      cache,
+      cacheKey
+    );
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function createRecordBuildingThumbnailFolderUnlocked_(
+  buildingId,
+  cache,
+  cacheKey
+) {
+  var root = getDriveSpikeFolder_();
+  var thumbnailRoots = root.getFoldersByName(
+    RECORD_THUMBNAIL_ROOT_FOLDER_NAME
+  );
+  var thumbnailRoot = thumbnailRoots.hasNext()
+    ? thumbnailRoots.next()
+    : root.createFolder(RECORD_THUMBNAIL_ROOT_FOLDER_NAME);
+
+  var buildingFolders = thumbnailRoot.getFoldersByName(buildingId);
+  var buildingFolder = buildingFolders.hasNext()
+    ? buildingFolders.next()
+    : thumbnailRoot.createFolder(buildingId);
+
+  cache.put(
+    cacheKey,
+    buildingFolder.getId(),
+    RECORD_UPLOAD_CACHE_SECONDS
+  );
+  return buildingFolder;
+}
+
 function normalizeBuildingSearchName_(buildingName) {
   return String(buildingName)
     .normalize('NFKC')
@@ -1446,10 +1775,16 @@ function photoResultFromSheetRecord_(record, reused) {
   return {
     photoId: String(record.object.photoId),
     storageFileId: String(record.object.storageFileId),
+    thumbnailFileId: optionalSheetString_(
+      record.object.thumbnailFileId
+    ),
+    thumbnailSaved: optionalSheetString_(
+      record.object.thumbnailFileId
+    ) !== null,
     byteSize: Number(record.object.byteSize),
     displayOrder: Number(record.object.displayOrder),
     reused: reused,
-    stage: '4-2.2'
+    stage: '5-2A'
   };
 }
 
@@ -1932,4 +2267,40 @@ function deleteMatchingSheetRows_(
       var sheet = spreadsheet.getSheetByName(sheetName);
       sheet.deleteRow(record.rowNumber);
     });
+}
+
+
+/**
+ * 段階5-2A: サムネイル項目の正規化だけを確認するテスト。
+ * DriveやSheetsは変更しない。
+ */
+function testNormalizeUploadPhotoThumbnailPayload() {
+  var thumbnailBytes = [1, 2, 3, 4];
+  var normalized = normalizeUploadPhotoPayload_(
+    'request-thumbnail-test-001',
+    {
+      buildingId: 'building-thumbnail-test-001',
+      visitId: 'visit-thumbnail-test-001',
+      photoId: 'photo-thumbnail-test-001',
+      fileName: 'sample.jpg',
+      mimeType: 'image/jpeg',
+      byteSize: 4,
+      base64Data: Utilities.base64Encode([5, 6, 7, 8]),
+      thumbnailMimeType: 'image/jpeg',
+      thumbnailByteSize: thumbnailBytes.length,
+      thumbnailBase64Data: Utilities.base64Encode(thumbnailBytes),
+      takenAt: new Date().toISOString(),
+      latitude: 35.681236,
+      longitude: 139.767125,
+      accuracyM: null,
+      locationSource: 'manual',
+      displayOrder: 1
+    }
+  );
+
+  console.log(JSON.stringify({
+    thumbnailMimeType: normalized.thumbnailMimeType,
+    thumbnailByteSize: normalized.thumbnailByteSize,
+    hasThumbnailBase64: normalized.thumbnailBase64Data !== null
+  }));
 }

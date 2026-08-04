@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../../core/config/app_config.dart';
 import '../models/record_submission_result.dart';
+import 'record_thumbnail_service.dart';
 
 class RecordPreparationPayload {
   const RecordPreparationPayload({
@@ -120,15 +121,21 @@ abstract interface class RecordSubmissionApiService {
 }
 
 class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
-  HttpRecordSubmissionApiService({http.Client? client, Uri? endpoint})
-    : _client = client ?? http.Client(),
-      _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl);
+  HttpRecordSubmissionApiService({
+    http.Client? client,
+    Uri? endpoint,
+    RecordThumbnailService? thumbnailService,
+  }) : _client = client ?? http.Client(),
+       _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl),
+       _thumbnailService =
+           thumbnailService ?? const ImageRecordThumbnailService();
 
   static const Duration _normalTimeout = Duration(seconds: 30);
   static const Duration _uploadTimeout = Duration(seconds: 60);
 
   final http.Client _client;
   final Uri _endpoint;
+  final RecordThumbnailService _thumbnailService;
 
   @override
   Future<BeginRecordResult> beginRecord({
@@ -175,7 +182,6 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
       },
       timeout: _normalTimeout,
     );
-
     return BeginRecordResult.fromJson(_requiredData(response));
   }
 
@@ -201,6 +207,10 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
   }) async {
     final Stopwatch encodeStopwatch = Stopwatch()..start();
     final String base64Data = base64Encode(bytes);
+    final RecordThumbnailData? thumbnail = await _createThumbnailSafely(bytes);
+    final String? thumbnailBase64Data = thumbnail == null
+        ? null
+        : base64Encode(thumbnail.bytes);
     encodeStopwatch.stop();
 
     final Stopwatch requestStopwatch = Stopwatch()..start();
@@ -217,6 +227,10 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
         'mimeType': mimeType,
         'byteSize': bytes.length,
         'base64Data': base64Data,
+        if (thumbnail != null) 'thumbnailMimeType': thumbnail.mimeType,
+        if (thumbnail != null) 'thumbnailByteSize': thumbnail.byteSize,
+        if (thumbnailBase64Data != null)
+          'thumbnailBase64Data': thumbnailBase64Data,
         'takenAt': takenAt.toIso8601String(),
         'latitude': latitude,
         'longitude': longitude,
@@ -238,6 +252,15 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     );
   }
 
+  Future<RecordThumbnailData?> _createThumbnailSafely(Uint8List bytes) async {
+    try {
+      return await _thumbnailService.createThumbnail(bytes);
+    } catch (_) {
+      // 元写真の送信を優先し、サムネイル生成失敗だけでは中断しない。
+      return null;
+    }
+  }
+
   @override
   Future<FinalizeRecordResult> finalizeRecord({
     required String requestId,
@@ -254,7 +277,6 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
       payload: <String, Object?>{'buildingId': buildingId, 'visitId': visitId},
       timeout: _normalTimeout,
     );
-
     return FinalizeRecordResult.fromJson(_requiredData(response));
   }
 
@@ -298,14 +320,12 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
           'Apps Scriptの応答がJSONオブジェクトではありません。',
         );
       }
-
       if (decoded['ok'] != true) {
         throw RecordSubmissionApiException(
           _optionalString(decoded['message']) ?? '記録を保存できませんでした。',
           errorCode: _optionalString(decoded['errorCode']),
         );
       }
-
       return decoded;
     } on TimeoutException {
       throw const RecordSubmissionApiException('Apps Scriptから時間内に応答がありませんでした。');

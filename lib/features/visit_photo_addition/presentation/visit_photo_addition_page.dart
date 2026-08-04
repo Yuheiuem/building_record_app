@@ -30,8 +30,7 @@ class VisitPhotoAdditionPage extends StatefulWidget {
   final RecordSubmissionApiService? recordSubmissionApiService;
 
   @override
-  State<VisitPhotoAdditionPage> createState() =>
-      _VisitPhotoAdditionPageState();
+  State<VisitPhotoAdditionPage> createState() => _VisitPhotoAdditionPageState();
 }
 
 class _VisitPhotoAdditionPageState extends State<VisitPhotoAdditionPage> {
@@ -47,8 +46,7 @@ class _VisitPhotoAdditionPageState extends State<VisitPhotoAdditionPage> {
     _ownsBuildingDetailApiService = widget.buildingDetailApiService == null;
     _buildingDetailApiService =
         widget.buildingDetailApiService ?? HttpBuildingDetailApiService();
-    _ownsRecordSubmissionApiService =
-        widget.recordSubmissionApiService == null;
+    _ownsRecordSubmissionApiService = widget.recordSubmissionApiService == null;
     _recordSubmissionApiService =
         widget.recordSubmissionApiService ?? HttpRecordSubmissionApiService();
 
@@ -268,10 +266,7 @@ class _VisitSummaryCard extends StatelessWidget {
 }
 
 class _PhotoSelectionCard extends StatelessWidget {
-  const _PhotoSelectionCard({
-    required this.controller,
-    required this.onClear,
-  });
+  const _PhotoSelectionCard({required this.controller, required this.onClear});
 
   final VisitPhotoAdditionController controller;
   final VoidCallback onClear;
@@ -348,13 +343,12 @@ class _PhotoSelectionCard extends StatelessWidget {
                 key: const Key('visit-addition-photo-grid'),
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
-                gridDelegate:
-                    const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 230,
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 0.92,
-                    ),
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 230,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.92,
+                ),
                 itemCount: controller.photos.length,
                 itemBuilder: (BuildContext context, int index) {
                   final RecordDraftPhoto photo = controller.photos[index];
@@ -455,14 +449,19 @@ class _UploadStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (IconData, String) value = switch (status) {
-      VisitPhotoAdditionUploadStatus.pending =>
-        (Icons.schedule_outlined, '未送信'),
-      VisitPhotoAdditionUploadStatus.uploading =>
-        (Icons.cloud_upload_outlined, '送信中'),
-      VisitPhotoAdditionUploadStatus.uploaded =>
-        (Icons.check_circle_outline, '送信済み'),
-      VisitPhotoAdditionUploadStatus.failed =>
-        (Icons.error_outline, '失敗'),
+      VisitPhotoAdditionUploadStatus.pending => (
+        Icons.schedule_outlined,
+        '未送信',
+      ),
+      VisitPhotoAdditionUploadStatus.uploading => (
+        Icons.cloud_upload_outlined,
+        '送信中',
+      ),
+      VisitPhotoAdditionUploadStatus.uploaded => (
+        Icons.check_circle_outline,
+        '送信済み',
+      ),
+      VisitPhotoAdditionUploadStatus.failed => (Icons.error_outline, '失敗'),
     };
 
     return Chip(
@@ -494,9 +493,9 @@ class _UploadCard extends StatelessWidget {
               Text(
                 '写真の追加が完了しました。',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               if (controller.lastUploadDuration != null) ...<Widget>[
                 const SizedBox(height: 6),
@@ -535,15 +534,13 @@ class _UploadCard extends StatelessWidget {
           children: <Widget>[
             Text(
               '保存',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
             LinearProgressIndicator(
-              value: controller.photos.isEmpty
-                  ? 0
-                  : controller.uploadProgress,
+              value: controller.photos.isEmpty ? 0 : controller.uploadProgress,
             ),
             const SizedBox(height: 8),
             Text(
@@ -678,9 +675,7 @@ class _LoadErrorState extends StatelessWidget {
                     ? null
                     : onRefreshAuthentication,
                 icon: const Icon(Icons.refresh),
-                label: Text(
-                  isRefreshingAuthentication ? '認証を更新中' : '認証を更新',
-                ),
+                label: Text(isRefreshingAuthentication ? '認証を更新中' : '認証を更新'),
               )
             else
               FilledButton.icon(

@@ -13,9 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('建物情報・写真・訪問履歴を表示し再取得できる', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1000);
     addTearDown(tester.view.reset);
@@ -49,20 +47,13 @@ void main() {
     expect(find.text('外観を見学した。'), findsOneWidget);
     expect(find.text('写真ギャラリー'), findsOneWidget);
     expect(find.text('訪問履歴'), findsOneWidget);
-    expect(
-      find.byKey(const Key('record-building-revisit')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('record-building-revisit')), findsOneWidget);
     expect(
       find.byKey(const Key('building-representative-location-chip')),
       findsOneWidget,
     );
     expect(
-      find.byKey(
-        const ValueKey<String>(
-          'add-photos-to-visit-visit-12345678',
-        ),
-      ),
+      find.byKey(const ValueKey<String>('add-photos-to-visit-visit-12345678')),
       findsOneWidget,
     );
     expect(apiService.photoCallCount, 1);
@@ -247,8 +238,7 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
   void close() {}
 }
 
-class _FakeBuildingLocationApiService
-    implements BuildingLocationApiService {
+class _FakeBuildingLocationApiService implements BuildingLocationApiService {
   int updateCallCount = 0;
   String? lastBuildingId;
   double? lastLatitude;

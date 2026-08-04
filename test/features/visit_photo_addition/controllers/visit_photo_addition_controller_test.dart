@@ -234,11 +234,8 @@ class _FakeRecordImagePickerService implements RecordImagePickerService {
   }
 }
 
-class _FakeRecordSubmissionApiService
-    implements RecordSubmissionApiService {
-  _FakeRecordSubmissionApiService({
-    this.failOncePhotoIds = const <String>{},
-  });
+class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
+  _FakeRecordSubmissionApiService({this.failOncePhotoIds = const <String>{}});
 
   final Set<String> failOncePhotoIds;
   final List<_UploadCall> uploadCalls = <_UploadCall>[];

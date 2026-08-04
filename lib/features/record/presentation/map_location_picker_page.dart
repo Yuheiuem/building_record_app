@@ -57,8 +57,8 @@ class _MapLocationPickerPageState extends State<MapLocationPickerPage> {
 
   Future<void> _loadCurrentLocation() async {
     try {
-      final RecordDraftLocation location =
-          await _locationService.getCurrentLocation();
+      final RecordDraftLocation location = await _locationService
+          .getCurrentLocation();
       if (!mounted) {
         return;
       }
@@ -184,7 +184,9 @@ class _MapLocationPickerPageState extends State<MapLocationPickerPage> {
                             children: <Widget>[
                               SizedBox.square(
                                 dimension: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                               SizedBox(width: 8),
                               Text('現在地を取得しています。'),

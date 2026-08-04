@@ -80,9 +80,7 @@ class HttpBuildingLocationApiService implements BuildingLocationApiService {
         );
       }
     } on TimeoutException {
-      throw const BuildingLocationApiException(
-        'Apps Scriptから時間内に応答がありませんでした。',
-      );
+      throw const BuildingLocationApiException('Apps Scriptから時間内に応答がありませんでした。');
     } on FormatException catch (error) {
       throw BuildingLocationApiException(
         'Apps Scriptの応答を読み取れませんでした。${error.message}',

@@ -62,8 +62,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
         widget.buildingDetailApiService ?? HttpBuildingDetailApiService();
     _ownsLocationApiService = widget.buildingLocationApiService == null;
     _locationApiService =
-        widget.buildingLocationApiService ??
-        HttpBuildingLocationApiService();
+        widget.buildingLocationApiService ?? HttpBuildingLocationApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -244,9 +243,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('建物の代表位置を更新しました。')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('建物の代表位置を更新しました。')));
     } on BuildingLocationApiException catch (error) {
       if (!mounted) {
         return;
@@ -412,10 +411,7 @@ class _BuildingOverviewSection extends StatelessWidget {
             children: <Widget>[
               Expanded(flex: 3, child: information),
               const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: SizedBox(height: 420, child: map),
-              ),
+              Expanded(flex: 2, child: SizedBox(height: 420, child: map)),
             ],
           );
         }
@@ -608,9 +604,9 @@ class _TagGroup extends StatelessWidget {
             padding: const EdgeInsets.only(top: 7),
             child: Text(
               title,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
         ),
@@ -713,9 +709,7 @@ class _BuildingLocationCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SimpleAttributionWidget(
-                        source: Text('国土地理院'),
-                      ),
+                      const SimpleAttributionWidget(source: Text('国土地理院')),
                     ],
                   ),
           ),
@@ -834,101 +828,102 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return FutureBuilder<BuildingPhotoData>(
       future: future,
-      builder: (
-        BuildContext context,
-        AsyncSnapshot<BuildingPhotoData> snapshot,
-      ) {
-        if (snapshot.hasData) {
-          final BuildingPhotoData data = snapshot.data!;
-          return Material(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color: Theme.of(context).colorScheme.outlineVariant,
-              ),
-            ),
-            child: InkWell(
-              onTap: () => _showPhotoDialog(context, photo, data),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Expanded(
-                    child: Image.memory(
-                      data.bytes,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                      errorBuilder: (
-                        BuildContext context,
-                        Object error,
-                        StackTrace? stackTrace,
-                      ) {
-                        return const Center(
-                          child: Icon(Icons.broken_image, size: 42),
-                        );
-                      },
-                    ),
+      builder:
+          (BuildContext context, AsyncSnapshot<BuildingPhotoData> snapshot) {
+            if (snapshot.hasData) {
+              final BuildingPhotoData data = snapshot.data!;
+              return Material(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 8,
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            _formatDateTime(photo.takenAt ?? photo.createdAt),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
+                ),
+                child: InkWell(
+                  onTap: () => _showPhotoDialog(context, photo, data),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Expanded(
+                        child: Image.memory(
+                          data.bytes,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                          errorBuilder:
+                              (
+                                BuildContext context,
+                                Object error,
+                                StackTrace? stackTrace,
+                              ) {
+                                return const Center(
+                                  child: Icon(Icons.broken_image, size: 42),
+                                );
+                              },
                         ),
-                        const Icon(Icons.zoom_in, size: 18),
-                      ],
-                    ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                _formatDateTime(
+                                  photo.takenAt ?? photo.createdAt,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                            const Icon(Icons.zoom_in, size: 18),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          );
-        }
+                ),
+              );
+            }
 
-        if (snapshot.hasError) {
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  const Icon(Icons.broken_image, size: 36),
-                  const SizedBox(height: 8),
-                  const Text('写真を取得できませんでした。'),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('再試行'),
+            if (snapshot.hasError) {
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      const Icon(Icons.broken_image, size: 36),
+                      const SizedBox(height: 8),
+                      const Text('写真を取得できませんでした。'),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('再試行'),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          );
-        }
+                ),
+              );
+            }
 
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Center(child: CircularProgressIndicator()),
-        );
-      },
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Center(child: CircularProgressIndicator()),
+            );
+          },
     );
   }
 
@@ -1151,9 +1146,7 @@ class _VisitCard extends StatelessWidget {
           Align(
             alignment: Alignment.centerRight,
             child: OutlinedButton.icon(
-              key: ValueKey<String>(
-                'add-photos-to-visit-${visit.visitId}',
-              ),
+              key: ValueKey<String>('add-photos-to-visit-${visit.visitId}'),
               onPressed: onAddPhotos,
               icon: const Icon(Icons.add_photo_alternate_outlined),
               label: const Text('写真を追加'),
@@ -1197,11 +1190,7 @@ class _SectionEmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Icon(
-            icon,
-            size: 44,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+          Icon(icon, size: 44, color: Theme.of(context).colorScheme.primary),
           const SizedBox(height: 10),
           Text(message, textAlign: TextAlign.center),
         ],

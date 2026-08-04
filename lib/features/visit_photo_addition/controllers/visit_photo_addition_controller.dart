@@ -12,12 +12,7 @@ import '../../../data/services/building_detail_api_service.dart';
 import '../../../data/services/record_image_picker_service.dart';
 import '../../../data/services/record_submission_api_service.dart';
 
-enum VisitPhotoAdditionUploadStatus {
-  pending,
-  uploading,
-  uploaded,
-  failed,
-}
+enum VisitPhotoAdditionUploadStatus { pending, uploading, uploaded, failed }
 
 class VisitPhotoAdditionController extends ChangeNotifier {
   VisitPhotoAdditionController({
@@ -116,8 +111,7 @@ class VisitPhotoAdditionController extends ChangeNotifier {
       _photoLongitude != null;
 
   VisitPhotoAdditionUploadStatus uploadStatus(String photoId) {
-    return _uploadStatuses[photoId] ??
-        VisitPhotoAdditionUploadStatus.pending;
+    return _uploadStatuses[photoId] ?? VisitPhotoAdditionUploadStatus.pending;
   }
 
   UploadRecordPhotoResult? uploadResult(String photoId) {
@@ -142,8 +136,8 @@ class VisitPhotoAdditionController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final BuildingDetailData result =
-          await _buildingDetailApiService.getBuildingDetail(
+      final BuildingDetailData result = await _buildingDetailApiService
+          .getBuildingDetail(
             requestId: const Uuid().v4(),
             clientVersion: AppConfig.version,
             idToken: idToken,
@@ -235,8 +229,8 @@ class VisitPhotoAdditionController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final List<RecordDraftPhoto> selectedPhotos =
-          await _imagePickerService.pickImages();
+      final List<RecordDraftPhoto> selectedPhotos = await _imagePickerService
+          .pickImages();
       if (selectedPhotos.isEmpty) {
         return;
       }
@@ -262,8 +256,7 @@ class VisitPhotoAdditionController extends ChangeNotifier {
         _requestIds[photo.photoId] = const Uuid().v4();
         _displayOrders[photo.photoId] = _nextDisplayOrder;
         _nextDisplayOrder += 1;
-        _uploadStatuses[photo.photoId] =
-            VisitPhotoAdditionUploadStatus.pending;
+        _uploadStatuses[photo.photoId] = VisitPhotoAdditionUploadStatus.pending;
       }
 
       final List<String> rejectedReasons = <String>[];
@@ -370,8 +363,7 @@ class VisitPhotoAdditionController extends ChangeNotifier {
     for (final RecordDraftPhoto photo in _photos) {
       if (uploadStatus(photo.photoId) ==
           VisitPhotoAdditionUploadStatus.failed) {
-        _uploadStatuses[photo.photoId] =
-            VisitPhotoAdditionUploadStatus.pending;
+        _uploadStatuses[photo.photoId] = VisitPhotoAdditionUploadStatus.pending;
       }
     }
 
@@ -464,8 +456,8 @@ class VisitPhotoAdditionController extends ChangeNotifier {
   }) async {
     final BuildingVisit selectedVisit = _visit!;
     try {
-      final UploadRecordPhotoResult result =
-          await _recordSubmissionApiService.uploadPhoto(
+      final UploadRecordPhotoResult result = await _recordSubmissionApiService
+          .uploadPhoto(
             requestId: _requestIds[photo.photoId]!,
             clientVersion: AppConfig.version,
             idToken: idToken,

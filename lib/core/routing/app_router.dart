@@ -86,8 +86,7 @@ GoRouter createAppRouter({
           return RecordPage(
             authService: authService,
             bootstrapApiService: bootstrapApiService,
-            initialExistingBuildingId:
-                state.uri.queryParameters['buildingId'],
+            initialExistingBuildingId: state.uri.queryParameters['buildingId'],
           );
         },
       ),
