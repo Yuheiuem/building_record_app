@@ -10,12 +10,15 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../data/models/bootstrap_data.dart';
 import '../../../data/models/building.dart';
 import '../../../data/models/building_detail_data.dart';
 import '../../../data/models/building_tag.dart';
 import '../../../data/models/record_draft_location.dart';
 import '../../../data/services/auth_service.dart';
+import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
+import '../../../data/services/building_information_api_service.dart';
 import '../../../data/services/building_location_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../../record/presentation/map_location_picker_page.dart';
@@ -26,6 +29,8 @@ class BuildingDetailPage extends StatefulWidget {
     required this.buildingId,
     this.buildingDetailApiService,
     this.buildingLocationApiService,
+    this.bootstrapApiService,
+    this.buildingInformationApiService,
     this.enableNetworkTiles = true,
     super.key,
   });
@@ -34,6 +39,8 @@ class BuildingDetailPage extends StatefulWidget {
   final String buildingId;
   final BuildingDetailApiService? buildingDetailApiService;
   final BuildingLocationApiService? buildingLocationApiService;
+  final BootstrapApiService? bootstrapApiService;
+  final BuildingInformationApiService? buildingInformationApiService;
   final bool enableNetworkTiles;
 
   @override
@@ -47,6 +54,10 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   late final bool _ownsApiService;
   late final BuildingLocationApiService _locationApiService;
   late final bool _ownsLocationApiService;
+  late final BootstrapApiService _bootstrapApiService;
+  late final bool _ownsBootstrapApiService;
+  late final BuildingInformationApiService _informationApiService;
+  late final bool _ownsInformationApiService;
 
   final Map<String, Future<BuildingPhotoData>> _thumbnailFutures =
       <String, Future<BuildingPhotoData>>{};
@@ -70,6 +81,13 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _ownsLocationApiService = widget.buildingLocationApiService == null;
     _locationApiService =
         widget.buildingLocationApiService ?? HttpBuildingLocationApiService();
+    _ownsBootstrapApiService = widget.bootstrapApiService == null;
+    _bootstrapApiService =
+        widget.bootstrapApiService ?? HttpBootstrapApiService();
+    _ownsInformationApiService = widget.buildingInformationApiService == null;
+    _informationApiService =
+        widget.buildingInformationApiService ??
+        HttpBuildingInformationApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -97,6 +115,12 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
     if (_ownsLocationApiService) {
       _locationApiService.close();
+    }
+    if (_ownsBootstrapApiService) {
+      _bootstrapApiService.close();
+    }
+    if (_ownsInformationApiService) {
+      _informationApiService.close();
     }
     super.dispose();
   }
@@ -256,6 +280,129 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     await _loadDetail();
   }
 
+  Future<void> _editBuildingInformation() async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    late final BootstrapData bootstrapData;
+    try {
+      bootstrapData = await _bootstrapApiService.getBootstrapData(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+      );
+    } on BootstrapApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'タグ一覧を取得できませんでした。もう一度送信してください。';
+      });
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = false;
+    });
+
+    final Map<String, BuildingTag> editTagsById = <String, BuildingTag>{
+      for (final BuildingTag tag in detail.tags) tag.tagId: tag,
+      for (final BuildingTag tag in bootstrapData.tags) tag.tagId: tag,
+    };
+    final _BuildingInformationEditResult? result =
+        await showDialog<_BuildingInformationEditResult>(
+          context: context,
+          builder: (BuildContext dialogContext) {
+            return _BuildingInformationEditDialog(
+              building: detail.building,
+              tags: editTagsById.values.toList(growable: false),
+            );
+          },
+        );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _informationApiService.updateBuildingInformation(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+        buildingName: result.buildingName,
+        address: result.address,
+        designTagIds: result.designTagIds,
+        salesTagIds: result.salesTagIds,
+        constructionTagIds: result.constructionTagIds,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('建物情報を更新しました。')));
+    } on BuildingInformationApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '建物情報を更新できませんでした。もう一度送信してください。';
+      });
+    }
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -388,6 +535,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                     tagsById: tagsById,
                     enableNetworkTiles: widget.enableNetworkTiles,
                     onRefresh: _loadDetail,
+                    onEditInformation: _editBuildingInformation,
                     onEditLocation: _editBuildingLocation,
                     onRecordRevisit: () {
                       unawaited(
@@ -455,6 +603,7 @@ class _BuildingOverviewSection extends StatelessWidget {
     required this.tagsById,
     required this.enableNetworkTiles,
     required this.onRefresh,
+    required this.onEditInformation,
     required this.onEditLocation,
     required this.onRecordRevisit,
   });
@@ -463,6 +612,7 @@ class _BuildingOverviewSection extends StatelessWidget {
   final Map<String, BuildingTag> tagsById;
   final bool enableNetworkTiles;
   final Future<void> Function() onRefresh;
+  final VoidCallback onEditInformation;
   final VoidCallback onEditLocation;
   final VoidCallback onRecordRevisit;
 
@@ -477,6 +627,7 @@ class _BuildingOverviewSection extends StatelessWidget {
           detail: detail,
           tagsById: tagsById,
           onRefresh: onRefresh,
+          onEditInformation: onEditInformation,
           onEditLocation: onEditLocation,
           onRecordRevisit: onRecordRevisit,
         );
@@ -514,6 +665,7 @@ class _BuildingInformationCard extends StatelessWidget {
     required this.detail,
     required this.tagsById,
     required this.onRefresh,
+    required this.onEditInformation,
     required this.onEditLocation,
     required this.onRecordRevisit,
   });
@@ -521,6 +673,7 @@ class _BuildingInformationCard extends StatelessWidget {
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
   final Future<void> Function() onRefresh;
+  final VoidCallback onEditInformation;
   final VoidCallback onEditLocation;
   final VoidCallback onRecordRevisit;
 
@@ -614,6 +767,13 @@ class _BuildingInformationCard extends StatelessWidget {
               tagsById: tagsById,
             ),
             const SizedBox(height: 18),
+            OutlinedButton.icon(
+              key: const Key('edit-building-information'),
+              onPressed: onEditInformation,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('建物情報を編集'),
+            ),
+            const SizedBox(height: 10),
             FilledButton.icon(
               key: const Key('record-building-revisit'),
               onPressed: onRecordRevisit,
@@ -715,6 +875,265 @@ class _TagGroup extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _BuildingInformationEditResult {
+  const _BuildingInformationEditResult({
+    required this.buildingName,
+    required this.address,
+    required this.designTagIds,
+    required this.salesTagIds,
+    required this.constructionTagIds,
+  });
+
+  final String buildingName;
+  final String? address;
+  final List<String> designTagIds;
+  final List<String> salesTagIds;
+  final List<String> constructionTagIds;
+}
+
+class _BuildingInformationEditDialog extends StatefulWidget {
+  const _BuildingInformationEditDialog({
+    required this.building,
+    required this.tags,
+  });
+
+  final Building building;
+  final List<BuildingTag> tags;
+
+  @override
+  State<_BuildingInformationEditDialog> createState() =>
+      _BuildingInformationEditDialogState();
+}
+
+class _BuildingInformationEditDialogState
+    extends State<_BuildingInformationEditDialog> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _buildingNameController;
+  late final TextEditingController _addressController;
+  late final Set<String> _designTagIds;
+  late final Set<String> _salesTagIds;
+  late final Set<String> _constructionTagIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _buildingNameController = TextEditingController(
+      text: widget.building.buildingName,
+    );
+    _addressController = TextEditingController(
+      text: widget.building.address ?? '',
+    );
+    _designTagIds = widget.building.designTags.toSet();
+    _salesTagIds = widget.building.salesTags.toSet();
+    _constructionTagIds = widget.building.constructionTags.toSet();
+  }
+
+  @override
+  void dispose() {
+    _buildingNameController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  List<BuildingTag> _tagOptions(BuildingTagType type, Set<String> selectedIds) {
+    final List<BuildingTag> result = widget.tags
+        .where(
+          (BuildingTag tag) =>
+              tag.tagType == type &&
+              (tag.isActive || selectedIds.contains(tag.tagId)),
+        )
+        .toList(growable: false);
+    result.sort((BuildingTag left, BuildingTag right) {
+      if (left.displayOrder != right.displayOrder) {
+        return left.displayOrder.compareTo(right.displayOrder);
+      }
+      return left.tagName.compareTo(right.tagName);
+    });
+    return result;
+  }
+
+  void _toggleTag(Set<String> selectedIds, String tagId, bool selected) {
+    setState(() {
+      if (selected) {
+        selectedIds.add(tagId);
+      } else {
+        selectedIds.remove(tagId);
+      }
+    });
+  }
+
+  void _save() {
+    if (_formKey.currentState?.validate() != true) {
+      return;
+    }
+
+    final String address = _addressController.text.trim();
+    Navigator.of(context).pop(
+      _BuildingInformationEditResult(
+        buildingName: _buildingNameController.text.trim(),
+        address: address.isEmpty ? null : address,
+        designTagIds: _designTagIds.toList(growable: false),
+        salesTagIds: _salesTagIds.toList(growable: false),
+        constructionTagIds: _constructionTagIds.toList(growable: false),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('建物情報を編集'),
+          leading: IconButton(
+            key: const Key('cancel-building-information-edit'),
+            onPressed: () => Navigator.of(context).pop(),
+            tooltip: 'キャンセル',
+            icon: const Icon(Icons.close),
+          ),
+        ),
+        body: SafeArea(
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+              children: <Widget>[
+                TextFormField(
+                  key: const Key('edit-building-name-field'),
+                  controller: _buildingNameController,
+                  maxLength: 100,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: '建物名',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (String? value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return '建物名を入力してください。';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  key: const Key('edit-building-address-field'),
+                  controller: _addressController,
+                  maxLength: 200,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '住所（任意）',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _BuildingEditTagSection(
+                  title: '設計タグ',
+                  options: _tagOptions(BuildingTagType.design, _designTagIds),
+                  selectedIds: _designTagIds,
+                  onSelected: (String tagId, bool selected) {
+                    _toggleTag(_designTagIds, tagId, selected);
+                  },
+                ),
+                const SizedBox(height: 12),
+                _BuildingEditTagSection(
+                  title: '営業タグ',
+                  options: _tagOptions(BuildingTagType.sales, _salesTagIds),
+                  selectedIds: _salesTagIds,
+                  onSelected: (String tagId, bool selected) {
+                    _toggleTag(_salesTagIds, tagId, selected);
+                  },
+                ),
+                const SizedBox(height: 12),
+                _BuildingEditTagSection(
+                  title: '施工タグ',
+                  options: _tagOptions(
+                    BuildingTagType.construction,
+                    _constructionTagIds,
+                  ),
+                  selectedIds: _constructionTagIds,
+                  onSelected: (String tagId, bool selected) {
+                    _toggleTag(_constructionTagIds, tagId, selected);
+                  },
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  key: const Key('save-building-information-edit'),
+                  onPressed: _save,
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('変更を保存'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BuildingEditTagSection extends StatelessWidget {
+  const _BuildingEditTagSection({
+    required this.title,
+    required this.options,
+    required this.selectedIds,
+    required this.onSelected,
+  });
+
+  final String title;
+  final List<BuildingTag> options;
+  final Set<String> selectedIds;
+  final void Function(String tagId, bool selected) onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            if (options.isEmpty)
+              Text(
+                '選択できるタグがありません。',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: options
+                    .map((BuildingTag tag) {
+                      return FilterChip(
+                        key: ValueKey<String>('edit-building-tag-${tag.tagId}'),
+                        selected: selectedIds.contains(tag.tagId),
+                        onSelected: (bool selected) {
+                          onSelected(tag.tagId, selected);
+                        },
+                        label: Text(
+                          tag.isActive ? tag.tagName : '${tag.tagName}（無効）',
+                        ),
+                      );
+                    })
+                    .toList(growable: false),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -2,11 +2,14 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:building_record_app/core/config/app_config.dart';
+import 'package:building_record_app/data/models/bootstrap_data.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_detail_data.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
+import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/building_detail_api_service.dart';
+import 'package:building_record_app/data/services/building_information_api_service.dart';
 import 'package:building_record_app/data/services/building_location_api_service.dart';
 import 'package:building_record_app/features/building_detail/presentation/building_detail_page.dart';
 import 'package:flutter/material.dart';
@@ -47,6 +50,7 @@ void main() {
     expect(find.text('外観を見学した。'), findsOneWidget);
     expect(find.text('写真ギャラリー'), findsOneWidget);
     expect(find.text('訪問履歴'), findsOneWidget);
+    expect(find.byKey(const Key('edit-building-information')), findsOneWidget);
     expect(find.byKey(const Key('record-building-revisit')), findsOneWidget);
     expect(
       find.byKey(const Key('building-representative-location-chip')),
@@ -118,6 +122,83 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(apiService.detailCallCount, 3);
+  });
+
+  testWidgets('建物名・住所・建物タグを編集できる', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 1000);
+    addTearDown(tester.view.reset);
+
+    final _FakeBuildingDetailApiService detailApiService =
+        _FakeBuildingDetailApiService();
+    final _FakeBootstrapApiService bootstrapApiService =
+        _FakeBootstrapApiService();
+    final _FakeBuildingInformationApiService informationApiService =
+        _FakeBuildingInformationApiService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BuildingDetailPage(
+          authService: _FakeAuthService(),
+          buildingId: 'building-12345678',
+          buildingDetailApiService: detailApiService,
+          buildingLocationApiService: _FakeBuildingLocationApiService(),
+          bootstrapApiService: bootstrapApiService,
+          buildingInformationApiService: informationApiService,
+          enableNetworkTiles: false,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final Finder editButton = find.byKey(
+      const Key('edit-building-information'),
+    );
+    await tester.ensureVisible(editButton);
+    await tester.pumpAndSettle();
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+
+    expect(bootstrapApiService.callCount, 1);
+    expect(find.byKey(const Key('edit-building-name-field')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('edit-building-name-field')),
+      '更新後のテスト建物',
+    );
+    await tester.enterText(
+      find.byKey(const Key('edit-building-address-field')),
+      '東京都千代田区丸の内1-1',
+    );
+
+    final Finder salesTag = find.byKey(
+      const ValueKey<String>('edit-building-tag-tag-sales-1234'),
+    );
+    await tester.ensureVisible(salesTag);
+    await tester.pumpAndSettle();
+    await tester.tap(salesTag);
+    await tester.pumpAndSettle();
+
+    final Finder saveButton = find.byKey(
+      const Key('save-building-information-edit'),
+    );
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(informationApiService.updateCallCount, 1);
+    expect(informationApiService.lastBuildingId, 'building-12345678');
+    expect(informationApiService.lastBuildingName, '更新後のテスト建物');
+    expect(informationApiService.lastAddress, '東京都千代田区丸の内1-1');
+    expect(informationApiService.lastDesignTagIds, <String>['tag-design-1234']);
+    expect(informationApiService.lastSalesTagIds, <String>['tag-sales-1234']);
+    expect(informationApiService.lastConstructionTagIds, <String>[
+      'tag-construction-1234',
+    ]);
+    expect(detailApiService.detailCallCount, 2);
+    expect(find.text('建物情報を更新しました。'), findsOneWidget);
   });
 }
 
@@ -315,6 +396,102 @@ class _FakeBuildingLocationApiService implements BuildingLocationApiService {
     lastBuildingId = buildingId;
     lastLatitude = latitude;
     lastLongitude = longitude;
+  }
+
+  @override
+  void close() {}
+}
+
+class _FakeBootstrapApiService implements BootstrapApiService {
+  int callCount = 0;
+
+  @override
+  Future<BootstrapData> getBootstrapData({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+  }) async {
+    callCount += 1;
+    return BootstrapData(
+      requestId: requestId,
+      serverTime: DateTime.parse('2026-08-04T15:00:00+09:00'),
+      schemaVersion: '1.0',
+      stage: '5-3A',
+      buildings: const <Building>[],
+      tags: const <BuildingTag>[
+        BuildingTag(
+          tagId: 'tag-design-1234',
+          tagType: BuildingTagType.design,
+          tagName: '設計第一部',
+          normalizedName: '設計第一部',
+          displayOrder: 10,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        ),
+        BuildingTag(
+          tagId: 'tag-sales-1234',
+          tagType: BuildingTagType.sales,
+          tagName: '営業第一部',
+          normalizedName: '営業第一部',
+          displayOrder: 10,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        ),
+        BuildingTag(
+          tagId: 'tag-construction-1234',
+          tagType: BuildingTagType.construction,
+          tagName: '当社施工',
+          normalizedName: '当社施工',
+          displayOrder: 10,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        ),
+      ],
+      counts: const BootstrapCounts(
+        buildings: 1,
+        visits: 1,
+        photos: 6,
+        tags: 3,
+      ),
+    );
+  }
+
+  @override
+  void close() {}
+}
+
+class _FakeBuildingInformationApiService
+    implements BuildingInformationApiService {
+  int updateCallCount = 0;
+  String? lastBuildingId;
+  String? lastBuildingName;
+  String? lastAddress;
+  List<String>? lastDesignTagIds;
+  List<String>? lastSalesTagIds;
+  List<String>? lastConstructionTagIds;
+
+  @override
+  Future<void> updateBuildingInformation({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String buildingName,
+    required String? address,
+    required List<String> designTagIds,
+    required List<String> salesTagIds,
+    required List<String> constructionTagIds,
+  }) async {
+    updateCallCount += 1;
+    lastBuildingId = buildingId;
+    lastBuildingName = buildingName;
+    lastAddress = address;
+    lastDesignTagIds = List<String>.from(designTagIds);
+    lastSalesTagIds = List<String>.from(salesTagIds);
+    lastConstructionTagIds = List<String>.from(constructionTagIds);
   }
 
   @override
