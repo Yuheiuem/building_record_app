@@ -216,7 +216,7 @@ class _BrowsePageState extends State<BrowsePage> {
               !_failedCoverPhotoIds.contains(photoId),
         )
         .toSet()
-        .take(8)
+        .take(4)
         .toList(growable: false);
     if (pendingPhotoIds.isEmpty) {
       return;

@@ -21,7 +21,7 @@ class HttpBootstrapApiService implements BootstrapApiService {
     : _client = client ?? http.Client(),
       _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl);
 
-  static const Duration _requestTimeout = Duration(seconds: 30);
+  static const Duration _requestTimeout = Duration(seconds: 45);
 
   final http.Client _client;
   final Uri _endpoint;
@@ -62,14 +62,12 @@ class HttpBootstrapApiService implements BootstrapApiService {
       if (decoded is! Map<String, dynamic>) {
         throw const BootstrapApiException('Apps Scriptの応答がJSONオブジェクトではありません。');
       }
-
       if (decoded['ok'] != true) {
         throw BootstrapApiException(
           _optionalString(decoded['message']) ?? 'データを取得できませんでした。',
           errorCode: _optionalString(decoded['errorCode']),
         );
       }
-
       return BootstrapData.fromJson(decoded);
     } on TimeoutException {
       throw const BootstrapApiException('Apps Scriptから時間内に応答がありませんでした。');

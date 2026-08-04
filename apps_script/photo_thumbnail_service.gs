@@ -33,11 +33,16 @@ function handleGetPhotoThumbnailData(requestId, payload, authContext) {
  *
  * @param {string} photoId
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet=} spreadsheet
+ * @param {Object=} preloadedPhotoRecord
  * @return {Object}
  */
-function getPhotoThumbnailResponseData_(photoId, spreadsheet) {
+function getPhotoThumbnailResponseData_(
+  photoId,
+  spreadsheet,
+  preloadedPhotoRecord
+) {
   var dataSpreadsheet = spreadsheet || getDataSpreadsheet_();
-  var photoRecord = findBuildingDetailSheetRecord_(
+  var photoRecord = preloadedPhotoRecord || findBuildingDetailSheetRecord_(
     dataSpreadsheet,
     'Photos',
     'photoId',
@@ -119,7 +124,7 @@ function getPhotoThumbnailResponseData_(photoId, spreadsheet) {
     byteSize: bytes.length,
     base64Data: Utilities.base64Encode(bytes),
     source: source,
-    stage: '5-4A'
+    stage: '5-4A.1'
   };
 }
 

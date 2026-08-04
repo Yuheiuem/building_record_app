@@ -1,4 +1,4 @@
-var BUILDING_COVER_THUMBNAIL_BATCH_LIMIT_ = 8;
+var BUILDING_COVER_THUMBNAIL_BATCH_LIMIT_ = 4;
 
 /**
  * 建物の代表写真を更新する。
@@ -67,7 +67,7 @@ function handleUpdateBuildingCoverPhoto(requestId, payload, authContext) {
       true,
       normalizedRequestId,
       {
-        stage: '5-4A',
+        stage: '5-4A.1',
         buildingId: normalized.buildingId,
         coverPhotoId: normalized.photoId
       },
@@ -94,10 +94,29 @@ function handleGetCoverPhotoThumbnails(requestId, payload, authContext) {
   var thumbnails = [];
   var missingPhotoIds = [];
   var spreadsheet = getDataSpreadsheet_();
+  var requestedPhotoIds = {};
+  normalized.photoIds.forEach(function(photoId) {
+    requestedPhotoIds[photoId] = true;
+  });
+
+  // Photosシートはバッチ内で1回だけ読み、photoIdごとの再検索を避ける。
+  var photoRecordsById = {};
+  readSheetObjects_(spreadsheet, 'Photos').forEach(function(photoRecord) {
+    var photoId = optionalSheetString_(photoRecord.photoId);
+    if (photoId !== null && requestedPhotoIds[photoId]) {
+      photoRecordsById[photoId] = photoRecord;
+    }
+  });
 
   normalized.photoIds.forEach(function(photoId) {
     try {
-      thumbnails.push(getPhotoThumbnailResponseData_(photoId, spreadsheet));
+      var photoRecord = photoRecordsById[photoId];
+      if (!photoRecord) {
+        throw createApiError_('NOT_FOUND', '写真が見つかりませんでした。');
+      }
+      thumbnails.push(
+        getPhotoThumbnailResponseData_(photoId, spreadsheet, photoRecord)
+      );
     } catch (error) {
       missingPhotoIds.push(photoId);
     }
@@ -107,7 +126,7 @@ function handleGetCoverPhotoThumbnails(requestId, payload, authContext) {
     true,
     requestId,
     {
-      stage: '5-4A',
+      stage: '5-4A.1',
       thumbnails: thumbnails,
       missingPhotoIds: missingPhotoIds
     },
@@ -143,7 +162,7 @@ function normalizeGetCoverPhotoThumbnailsPayload_(payload) {
   if (safe.photoIds.length > BUILDING_COVER_THUMBNAIL_BATCH_LIMIT_) {
     throw createApiError_(
       'VALIDATION_ERROR',
-      '代表写真サムネイルは一度に8枚まで取得できます。'
+      '代表写真サムネイルは一度に4枚まで取得できます。'
     );
   }
 
