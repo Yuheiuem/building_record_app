@@ -11,6 +11,7 @@ import 'package:building_record_app/data/services/bootstrap_api_service.dart';
 import 'package:building_record_app/data/services/building_detail_api_service.dart';
 import 'package:building_record_app/data/services/building_information_api_service.dart';
 import 'package:building_record_app/data/services/building_location_api_service.dart';
+import 'package:building_record_app/data/services/visit_information_api_service.dart';
 import 'package:building_record_app/features/building_detail/presentation/building_detail_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,6 +55,10 @@ void main() {
     expect(find.byKey(const Key('record-building-revisit')), findsOneWidget);
     expect(
       find.byKey(const Key('building-representative-location-chip')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('edit-visit-visit-12345678')),
       findsOneWidget,
     );
     expect(
@@ -200,6 +205,107 @@ void main() {
     expect(detailApiService.detailCallCount, 2);
     expect(find.text('建物情報を更新しました。'), findsOneWidget);
   });
+
+  testWidgets('訪問記録のきっかけ・感想・位置を編集できる', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 1000);
+    addTearDown(tester.view.reset);
+
+    final _FakeBuildingDetailApiService detailApiService =
+        _FakeBuildingDetailApiService();
+    final _FakeBootstrapApiService bootstrapApiService =
+        _FakeBootstrapApiService();
+    final _FakeVisitInformationApiService visitInformationApiService =
+        _FakeVisitInformationApiService();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BuildingDetailPage(
+          authService: _FakeAuthService(),
+          buildingId: 'building-12345678',
+          buildingDetailApiService: detailApiService,
+          buildingLocationApiService: _FakeBuildingLocationApiService(),
+          bootstrapApiService: bootstrapApiService,
+          buildingInformationApiService: _FakeBuildingInformationApiService(),
+          visitInformationApiService: visitInformationApiService,
+          enableNetworkTiles: false,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final Finder editButton = find.byKey(
+      const ValueKey<String>('edit-visit-visit-12345678'),
+    );
+    await tester.ensureVisible(editButton);
+    await tester.pumpAndSettle();
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+
+    expect(bootstrapApiService.callCount, 1);
+    expect(
+      find.descendant(of: find.byType(Dialog), matching: find.text('訪問記録を編集')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('edit-visit-impression-field')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('edit-visit-impression-field')),
+      '更新後の訪問感想',
+    );
+
+    final Finder activeTriggerTag = find.byKey(
+      const ValueKey<String>('edit-visit-trigger-tag-tag-trigger-active-1234'),
+    );
+    await tester.ensureVisible(activeTriggerTag);
+    await tester.pumpAndSettle();
+    await tester.tap(activeTriggerTag);
+    await tester.pumpAndSettle();
+
+    final Finder locationButton = find.byKey(const Key('edit-visit-location'));
+    await tester.ensureVisible(locationButton);
+    await tester.pumpAndSettle();
+    await tester.tap(locationButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('地図で位置を指定'), findsOneWidget);
+    expect(find.text('緯度 35.681300'), findsOneWidget);
+    expect(find.text('経度 139.767200'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('confirm-map-location')));
+    await tester.pumpAndSettle();
+
+    final Finder saveButton = find.byKey(
+      const Key('save-visit-information-edit'),
+    );
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(visitInformationApiService.updateCallCount, 1);
+    expect(visitInformationApiService.lastBuildingId, 'building-12345678');
+    expect(visitInformationApiService.lastVisitId, 'visit-12345678');
+    expect(
+      visitInformationApiService.lastVisitedAt,
+      DateTime.parse('2026-07-30T14:00:00+09:00').toLocal(),
+    );
+    expect(visitInformationApiService.lastTriggerTagIds, <String>[
+      'tag-trigger-1234',
+      'tag-trigger-active-1234',
+    ]);
+    expect(visitInformationApiService.lastImpression, '更新後の訪問感想');
+    expect(visitInformationApiService.lastLatitude, 35.6813);
+    expect(visitInformationApiService.lastLongitude, 139.7672);
+    expect(visitInformationApiService.lastAccuracyM, isNull);
+    expect(visitInformationApiService.lastLocationSource, 'manual');
+    expect(detailApiService.detailCallCount, 2);
+    expect(find.text('訪問記録を更新しました。'), findsOneWidget);
+  });
 }
 
 class _FakeAuthService extends AuthService {
@@ -298,6 +404,16 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
         );
       }),
       tags: const <BuildingTag>[
+        BuildingTag(
+          tagId: 'tag-trigger-active-1234',
+          tagType: BuildingTagType.trigger,
+          tagName: '個人旅行',
+          normalizedName: '個人旅行',
+          displayOrder: 20,
+          isActive: true,
+          createdAt: null,
+          updatedAt: null,
+        ),
         BuildingTag(
           tagId: 'tag-design-1234',
           tagType: BuildingTagType.design,
@@ -454,7 +570,7 @@ class _FakeBootstrapApiService implements BootstrapApiService {
         buildings: 1,
         visits: 1,
         photos: 6,
-        tags: 3,
+        tags: 4,
       ),
     );
   }
@@ -492,6 +608,49 @@ class _FakeBuildingInformationApiService
     lastDesignTagIds = List<String>.from(designTagIds);
     lastSalesTagIds = List<String>.from(salesTagIds);
     lastConstructionTagIds = List<String>.from(constructionTagIds);
+  }
+
+  @override
+  void close() {}
+}
+
+class _FakeVisitInformationApiService implements VisitInformationApiService {
+  int updateCallCount = 0;
+  String? lastBuildingId;
+  String? lastVisitId;
+  DateTime? lastVisitedAt;
+  List<String>? lastTriggerTagIds;
+  String? lastImpression;
+  double? lastLatitude;
+  double? lastLongitude;
+  double? lastAccuracyM;
+  String? lastLocationSource;
+
+  @override
+  Future<void> updateVisitInformation({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String visitId,
+    required DateTime visitedAt,
+    required List<String> triggerTagIds,
+    required String impression,
+    required double? latitude,
+    required double? longitude,
+    required double? accuracyM,
+    required String locationSource,
+  }) async {
+    updateCallCount += 1;
+    lastBuildingId = buildingId;
+    lastVisitId = visitId;
+    lastVisitedAt = visitedAt;
+    lastTriggerTagIds = List<String>.from(triggerTagIds);
+    lastImpression = impression;
+    lastLatitude = latitude;
+    lastLongitude = longitude;
+    lastAccuracyM = accuracyM;
+    lastLocationSource = locationSource;
   }
 
   @override

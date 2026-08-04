@@ -20,6 +20,7 @@ import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
 import '../../../data/services/building_information_api_service.dart';
 import '../../../data/services/building_location_api_service.dart';
+import '../../../data/services/visit_information_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../../record/presentation/map_location_picker_page.dart';
 
@@ -31,6 +32,7 @@ class BuildingDetailPage extends StatefulWidget {
     this.buildingLocationApiService,
     this.bootstrapApiService,
     this.buildingInformationApiService,
+    this.visitInformationApiService,
     this.enableNetworkTiles = true,
     super.key,
   });
@@ -41,6 +43,7 @@ class BuildingDetailPage extends StatefulWidget {
   final BuildingLocationApiService? buildingLocationApiService;
   final BootstrapApiService? bootstrapApiService;
   final BuildingInformationApiService? buildingInformationApiService;
+  final VisitInformationApiService? visitInformationApiService;
   final bool enableNetworkTiles;
 
   @override
@@ -58,6 +61,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   late final bool _ownsBootstrapApiService;
   late final BuildingInformationApiService _informationApiService;
   late final bool _ownsInformationApiService;
+  late final VisitInformationApiService _visitInformationApiService;
+  late final bool _ownsVisitInformationApiService;
 
   final Map<String, Future<BuildingPhotoData>> _thumbnailFutures =
       <String, Future<BuildingPhotoData>>{};
@@ -88,6 +93,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _informationApiService =
         widget.buildingInformationApiService ??
         HttpBuildingInformationApiService();
+    _ownsVisitInformationApiService = widget.visitInformationApiService == null;
+    _visitInformationApiService =
+        widget.visitInformationApiService ?? HttpVisitInformationApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -121,6 +129,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
     if (_ownsInformationApiService) {
       _informationApiService.close();
+    }
+    if (_ownsVisitInformationApiService) {
+      _visitInformationApiService.close();
     }
     super.dispose();
   }
@@ -403,6 +414,134 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
   }
 
+  Future<void> _editVisitInformation(BuildingVisit visit) async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    late final BootstrapData bootstrapData;
+    try {
+      bootstrapData = await _bootstrapApiService.getBootstrapData(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+      );
+    } on BootstrapApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'タグ一覧を取得できませんでした。もう一度送信してください。';
+      });
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = false;
+    });
+
+    final Map<String, BuildingTag> editTagsById = <String, BuildingTag>{
+      for (final BuildingTag tag in detail.tags) tag.tagId: tag,
+      for (final BuildingTag tag in bootstrapData.tags) tag.tagId: tag,
+    };
+    final _VisitInformationEditResult? result =
+        await showDialog<_VisitInformationEditResult>(
+          context: context,
+          builder: (BuildContext dialogContext) {
+            return _VisitInformationEditDialog(
+              visit: visit,
+              building: detail.building,
+              tags: editTagsById.values.toList(growable: false),
+              enableNetworkTiles: widget.enableNetworkTiles,
+            );
+          },
+        );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _visitInformationApiService.updateVisitInformation(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+        visitId: visit.visitId,
+        visitedAt: result.visitedAt,
+        triggerTagIds: result.triggerTagIds,
+        impression: result.impression,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        accuracyM: result.accuracyM,
+        locationSource: result.locationSource,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('訪問記録を更新しました。')));
+    } on VisitInformationApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '訪問記録を更新できませんでした。もう一度送信してください。';
+      });
+    }
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -577,6 +716,7 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                   _VisitHistorySection(
                     detail: detail,
                     tagsById: tagsById,
+                    onEditVisit: _editVisitInformation,
                     onAddPhotos: _addPhotosToVisit,
                   ),
                   const SizedBox(height: 8),
@@ -1082,12 +1222,14 @@ class _BuildingEditTagSection extends StatelessWidget {
     required this.options,
     required this.selectedIds,
     required this.onSelected,
+    this.keyPrefix = 'edit-building-tag',
   });
 
   final String title;
   final List<BuildingTag> options;
   final Set<String> selectedIds;
   final void Function(String tagId, bool selected) onSelected;
+  final String keyPrefix;
 
   @override
   Widget build(BuildContext context) {
@@ -1119,7 +1261,7 @@ class _BuildingEditTagSection extends StatelessWidget {
                 children: options
                     .map((BuildingTag tag) {
                       return FilterChip(
-                        key: ValueKey<String>('edit-building-tag-${tag.tagId}'),
+                        key: ValueKey<String>('$keyPrefix-${tag.tagId}'),
                         selected: selectedIds.contains(tag.tagId),
                         onSelected: (bool selected) {
                           onSelected(tag.tagId, selected);
@@ -1568,15 +1710,326 @@ class _FullPhotoDialogState extends State<_FullPhotoDialog> {
   }
 }
 
+class _VisitInformationEditResult {
+  const _VisitInformationEditResult({
+    required this.visitedAt,
+    required this.triggerTagIds,
+    required this.impression,
+    required this.latitude,
+    required this.longitude,
+    required this.accuracyM,
+    required this.locationSource,
+  });
+
+  final DateTime visitedAt;
+  final List<String> triggerTagIds;
+  final String impression;
+  final double? latitude;
+  final double? longitude;
+  final double? accuracyM;
+  final String locationSource;
+}
+
+class _VisitInformationEditDialog extends StatefulWidget {
+  const _VisitInformationEditDialog({
+    required this.visit,
+    required this.building,
+    required this.tags,
+    required this.enableNetworkTiles,
+  });
+
+  final BuildingVisit visit;
+  final Building building;
+  final List<BuildingTag> tags;
+  final bool enableNetworkTiles;
+
+  @override
+  State<_VisitInformationEditDialog> createState() =>
+      _VisitInformationEditDialogState();
+}
+
+class _VisitInformationEditDialogState
+    extends State<_VisitInformationEditDialog> {
+  late final TextEditingController _impressionController;
+  late DateTime _visitedAt;
+  late final Set<String> _triggerTagIds;
+  double? _latitude;
+  double? _longitude;
+  double? _accuracyM;
+  late String _locationSource;
+
+  @override
+  void initState() {
+    super.initState();
+    _impressionController = TextEditingController(
+      text: widget.visit.impression,
+    );
+    _visitedAt = widget.visit.visitedAt.toLocal();
+    _triggerTagIds = widget.visit.triggerTags.toSet();
+    final bool hasVisitLocation =
+        widget.visit.latitude != null && widget.visit.longitude != null;
+    _latitude = hasVisitLocation ? widget.visit.latitude : null;
+    _longitude = hasVisitLocation ? widget.visit.longitude : null;
+    _accuracyM = hasVisitLocation ? widget.visit.accuracyM : null;
+    _locationSource = hasVisitLocation ? widget.visit.locationSource : '';
+  }
+
+  @override
+  void dispose() {
+    _impressionController.dispose();
+    super.dispose();
+  }
+
+  List<BuildingTag> get _triggerTagOptions {
+    final List<BuildingTag> result = widget.tags
+        .where(
+          (BuildingTag tag) =>
+              tag.tagType == BuildingTagType.trigger &&
+              (tag.isActive || _triggerTagIds.contains(tag.tagId)),
+        )
+        .toList(growable: false);
+    result.sort((BuildingTag left, BuildingTag right) {
+      if (left.displayOrder != right.displayOrder) {
+        return left.displayOrder.compareTo(right.displayOrder);
+      }
+      return left.tagName.compareTo(right.tagName);
+    });
+    return result;
+  }
+
+  Future<void> _selectVisitedAt() async {
+    final DateTime? selectedDate = await showDatePicker(
+      context: context,
+      initialDate: _visitedAt,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      helpText: '訪問日を選択',
+    );
+    if (!mounted || selectedDate == null) {
+      return;
+    }
+
+    final TimeOfDay? selectedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_visitedAt),
+      helpText: '訪問時刻を選択',
+    );
+    if (!mounted || selectedTime == null) {
+      return;
+    }
+
+    setState(() {
+      _visitedAt = DateTime(
+        selectedDate.year,
+        selectedDate.month,
+        selectedDate.day,
+        selectedTime.hour,
+        selectedTime.minute,
+      );
+    });
+  }
+
+  Future<void> _selectLocation() async {
+    final bool hasVisitLocation = _latitude != null && _longitude != null;
+    final double? initialLatitude = hasVisitLocation
+        ? _latitude
+        : widget.building.latitude;
+    final double? initialLongitude = hasVisitLocation
+        ? _longitude
+        : widget.building.longitude;
+    final RecordDraftLocation? selectedLocation = await Navigator.of(context)
+        .push<RecordDraftLocation>(
+          MaterialPageRoute<RecordDraftLocation>(
+            builder: (BuildContext context) {
+              return MapLocationPickerPage(
+                initialLatitude: initialLatitude,
+                initialLongitude: initialLongitude,
+                enableNetworkTiles: widget.enableNetworkTiles,
+              );
+            },
+          ),
+        );
+
+    if (!mounted || selectedLocation == null) {
+      return;
+    }
+
+    setState(() {
+      _latitude = selectedLocation.latitude;
+      _longitude = selectedLocation.longitude;
+      _accuracyM = selectedLocation.accuracyM;
+      _locationSource = selectedLocation.source.apiValue;
+    });
+  }
+
+  void _toggleTriggerTag(String tagId, bool selected) {
+    setState(() {
+      if (selected) {
+        _triggerTagIds.add(tagId);
+      } else {
+        _triggerTagIds.remove(tagId);
+      }
+    });
+  }
+
+  void _save() {
+    Navigator.of(context).pop(
+      _VisitInformationEditResult(
+        visitedAt: _visitedAt,
+        triggerTagIds: _triggerTagIds.toList(growable: false),
+        impression: _impressionController.text.trim(),
+        latitude: _latitude,
+        longitude: _longitude,
+        accuracyM: _accuracyM,
+        locationSource: _locationSource,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final List<BuildingTag> triggerOptions = _triggerTagOptions;
+    return Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('訪問記録を編集'),
+          leading: IconButton(
+            key: const Key('cancel-visit-information-edit'),
+            onPressed: () => Navigator.of(context).pop(),
+            tooltip: 'キャンセル',
+            icon: const Icon(Icons.close),
+          ),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            children: <Widget>[
+              Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        '訪問日時',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _formatDateTime(_visitedAt),
+                        key: const Key('edit-visit-date-time-value'),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        key: const Key('edit-visit-date-time'),
+                        onPressed: _selectVisitedAt,
+                        icon: const Icon(Icons.event_outlined),
+                        label: const Text('日時を変更'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _BuildingEditTagSection(
+                title: 'きっかけタグ',
+                options: triggerOptions,
+                selectedIds: _triggerTagIds,
+                keyPrefix: 'edit-visit-trigger-tag',
+                onSelected: _toggleTriggerTag,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('edit-visit-impression-field'),
+                controller: _impressionController,
+                maxLength: 2000,
+                minLines: 4,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                  labelText: '感想（任意）',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      Text(
+                        '訪問位置',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_latitude != null && _longitude != null) ...<Widget>[
+                        Text(
+                          '${_latitude!.toStringAsFixed(6)}, '
+                          '${_longitude!.toStringAsFixed(6)}',
+                          key: const Key('edit-visit-location-value'),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          <String>[
+                            _locationSourceLabel(_locationSource),
+                            if (_accuracyM != null)
+                              '精度 ${_accuracyM!.toStringAsFixed(1)}m',
+                          ].join('／'),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ] else
+                        Text(
+                          '位置情報なし',
+                          key: const Key('edit-visit-location-value'),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        key: const Key('edit-visit-location'),
+                        onPressed: _selectLocation,
+                        icon: const Icon(Icons.edit_location_alt_outlined),
+                        label: const Text('地図で位置を調整'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                key: const Key('save-visit-information-edit'),
+                onPressed: _save,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('変更を保存'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _VisitHistorySection extends StatelessWidget {
   const _VisitHistorySection({
     required this.detail,
     required this.tagsById,
+    required this.onEditVisit,
     required this.onAddPhotos,
   });
 
   final BuildingDetailData detail;
   final Map<String, BuildingTag> tagsById;
+  final ValueChanged<BuildingVisit> onEditVisit;
   final ValueChanged<BuildingVisit> onAddPhotos;
 
   @override
@@ -1625,6 +2078,7 @@ class _VisitHistorySection extends StatelessWidget {
                     visit: visit,
                     photoCount: detail.photosForVisit(visit.visitId).length,
                     tagsById: tagsById,
+                    onEdit: () => onEditVisit(visit),
                     onAddPhotos: () => onAddPhotos(visit),
                   );
                 },
@@ -1641,12 +2095,14 @@ class _VisitCard extends StatelessWidget {
     required this.visit,
     required this.photoCount,
     required this.tagsById,
+    required this.onEdit,
     required this.onAddPhotos,
   });
 
   final BuildingVisit visit;
   final int photoCount;
   final Map<String, BuildingTag> tagsById;
+  final VoidCallback onEdit;
   final VoidCallback onAddPhotos;
 
   @override
@@ -1729,14 +2185,24 @@ class _VisitCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: OutlinedButton.icon(
-              key: ValueKey<String>('add-photos-to-visit-${visit.visitId}'),
-              onPressed: onAddPhotos,
-              icon: const Icon(Icons.add_photo_alternate_outlined),
-              label: const Text('写真を追加'),
-            ),
+          Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              OutlinedButton.icon(
+                key: ValueKey<String>('edit-visit-${visit.visitId}'),
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_calendar_outlined),
+                label: const Text('訪問記録を編集'),
+              ),
+              OutlinedButton.icon(
+                key: ValueKey<String>('add-photos-to-visit-${visit.visitId}'),
+                onPressed: onAddPhotos,
+                icon: const Icon(Icons.add_photo_alternate_outlined),
+                label: const Text('写真を追加'),
+              ),
+            ],
           ),
         ],
       ),
