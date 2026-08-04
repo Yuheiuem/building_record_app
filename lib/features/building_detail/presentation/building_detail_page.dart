@@ -17,6 +17,7 @@ import '../../../data/models/building_tag.dart';
 import '../../../data/models/record_draft_location.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
+import '../../../data/services/building_cover_photo_api_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
 import '../../../data/services/building_information_api_service.dart';
 import '../../../data/services/building_location_api_service.dart';
@@ -29,6 +30,7 @@ class BuildingDetailPage extends StatefulWidget {
     required this.authService,
     required this.buildingId,
     this.buildingDetailApiService,
+    this.buildingCoverPhotoApiService,
     this.buildingLocationApiService,
     this.bootstrapApiService,
     this.buildingInformationApiService,
@@ -40,6 +42,7 @@ class BuildingDetailPage extends StatefulWidget {
   final AuthService authService;
   final String buildingId;
   final BuildingDetailApiService? buildingDetailApiService;
+  final BuildingCoverPhotoApiService? buildingCoverPhotoApiService;
   final BuildingLocationApiService? buildingLocationApiService;
   final BootstrapApiService? bootstrapApiService;
   final BuildingInformationApiService? buildingInformationApiService;
@@ -55,6 +58,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
 
   late final BuildingDetailApiService _apiService;
   late final bool _ownsApiService;
+  late final BuildingCoverPhotoApiService _coverPhotoApiService;
+  late final bool _ownsCoverPhotoApiService;
   late final BuildingLocationApiService _locationApiService;
   late final bool _ownsLocationApiService;
   late final BootstrapApiService _bootstrapApiService;
@@ -83,6 +88,10 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _ownsApiService = widget.buildingDetailApiService == null;
     _apiService =
         widget.buildingDetailApiService ?? HttpBuildingDetailApiService();
+    _ownsCoverPhotoApiService = widget.buildingCoverPhotoApiService == null;
+    _coverPhotoApiService =
+        widget.buildingCoverPhotoApiService ??
+        HttpBuildingCoverPhotoApiService();
     _ownsLocationApiService = widget.buildingLocationApiService == null;
     _locationApiService =
         widget.buildingLocationApiService ?? HttpBuildingLocationApiService();
@@ -120,6 +129,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   void dispose() {
     if (_ownsApiService) {
       _apiService.close();
+    }
+    if (_ownsCoverPhotoApiService) {
+      _coverPhotoApiService.close();
     }
     if (_ownsLocationApiService) {
       _locationApiService.close();
@@ -542,6 +554,70 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
   }
 
+  Future<void> _setCoverPhoto(BuildingPhoto photo) async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+    if (detail.building.coverPhotoId == photo.photoId) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _coverPhotoApiService.updateBuildingCoverPhoto(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+        photoId: photo.photoId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('代表写真を更新しました。')));
+    } on BuildingCoverPhotoApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '代表写真を更新できませんでした。もう一度送信してください。';
+      });
+    }
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -694,9 +770,11 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                   _PhotoGallerySection(
                     allPhotoCount: detail.photos.length,
                     photos: shownPhotos,
+                    coverPhotoId: detail.building.coverPhotoId,
                     thumbnailFuture: _thumbnailFuture,
                     onRetryThumbnail: _retryThumbnail,
                     onOpenPhoto: _openPhoto,
+                    onSetCoverPhoto: _setCoverPhoto,
                     onShowMore: shownPhotoCount < detail.photos.length
                         ? () {
                             setState(() {
@@ -1373,18 +1451,22 @@ class _PhotoGallerySection extends StatelessWidget {
   const _PhotoGallerySection({
     required this.allPhotoCount,
     required this.photos,
+    required this.coverPhotoId,
     required this.thumbnailFuture,
     required this.onRetryThumbnail,
     required this.onOpenPhoto,
+    required this.onSetCoverPhoto,
     required this.onShowMore,
     required this.onOpenDrive,
   });
 
   final int allPhotoCount;
   final List<BuildingPhoto> photos;
+  final String? coverPhotoId;
   final Future<BuildingPhotoData> Function(BuildingPhoto photo) thumbnailFuture;
   final ValueChanged<BuildingPhoto> onRetryThumbnail;
   final ValueChanged<BuildingPhoto> onOpenPhoto;
+  final ValueChanged<BuildingPhoto> onSetCoverPhoto;
   final VoidCallback? onShowMore;
   final VoidCallback? onOpenDrive;
 
@@ -1438,8 +1520,10 @@ class _PhotoGallerySection extends StatelessWidget {
                     key: ValueKey<String>('building-photo-${photo.photoId}'),
                     photo: photo,
                     thumbnailFuture: thumbnailFuture(photo),
+                    isCoverPhoto: coverPhotoId == photo.photoId,
                     onRetry: () => onRetryThumbnail(photo),
                     onOpen: () => onOpenPhoto(photo),
+                    onSetCoverPhoto: () => onSetCoverPhoto(photo),
                   );
                 },
               ),
@@ -1472,15 +1556,19 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
   const _AuthenticatedPhotoTile({
     required this.photo,
     required this.thumbnailFuture,
+    required this.isCoverPhoto,
     required this.onRetry,
     required this.onOpen,
+    required this.onSetCoverPhoto,
     super.key,
   });
 
   final BuildingPhoto photo;
   final Future<BuildingPhotoData> thumbnailFuture;
+  final bool isCoverPhoto;
   final VoidCallback onRetry;
   final VoidCallback onOpen;
+  final VoidCallback onSetCoverPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -1538,6 +1626,27 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
+                            IconButton(
+                              key: ValueKey<String>(
+                                'set-cover-photo-${photo.photoId}',
+                              ),
+                              tooltip: isCoverPhoto ? '代表写真に設定済み' : '代表写真に設定',
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints.tightFor(
+                                width: 34,
+                                height: 34,
+                              ),
+                              onPressed: isCoverPhoto ? null : onSetCoverPhoto,
+                              icon: Icon(
+                                isCoverPhoto ? Icons.star : Icons.star_border,
+                                color: isCoverPhoto
+                                    ? Theme.of(context).colorScheme.primary
+                                    : null,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 2),
                             const Icon(Icons.zoom_in, size: 18),
                           ],
                         ),

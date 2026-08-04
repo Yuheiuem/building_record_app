@@ -1,9 +1,13 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:building_record_app/core/config/app_config.dart';
 import 'package:building_record_app/data/models/bootstrap_data.dart';
 import 'package:building_record_app/data/models/building.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
+import 'package:building_record_app/data/services/building_cover_photo_api_service.dart';
 import 'package:building_record_app/features/browse/presentation/browse_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -17,6 +21,8 @@ void main() {
 
     final _FakeAuthService authService = _FakeAuthService();
     final _FakeBootstrapApiService apiService = _FakeBootstrapApiService();
+    final _FakeBuildingCoverPhotoApiService coverPhotoApiService =
+        _FakeBuildingCoverPhotoApiService();
     Building? openedBuilding;
 
     await tester.pumpWidget(
@@ -24,6 +30,7 @@ void main() {
         home: BrowsePage(
           authService: authService,
           bootstrapApiService: apiService,
+          buildingCoverPhotoApiService: coverPhotoApiService,
           enableNetworkTiles: false,
           onOpenBuilding: (Building building) {
             openedBuilding = building;
@@ -49,6 +56,12 @@ void main() {
     expect(find.text('南の建物'), findsOneWidget);
     expect(find.text('国土地理院'), findsOneWidget);
     expect(find.text('設計第一部'), findsOneWidget);
+    expect(coverPhotoApiService.callCount, 1);
+    expect(coverPhotoApiService.lastPhotoIds, <String>['photo-cover-north']);
+    expect(
+      find.byKey(const ValueKey<String>('browse-cover-photo-image-north')),
+      findsOneWidget,
+    );
 
     await tester.tap(
       find.byKey(const ValueKey<String>('browse-building-north')),
@@ -66,11 +79,15 @@ void main() {
     expect(find.text('南の建物'), findsOneWidget);
     expect(find.text('地図表示範囲 1件'), findsOneWidget);
 
+    await tester.enterText(find.byKey(const Key('browse-building-search')), '');
+    await tester.pump();
+
     await tester.tap(find.byKey(const Key('refresh-browse-data')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 
     expect(apiService.callCount, 2);
+    expect(coverPhotoApiService.callCount, 2);
   });
 }
 
@@ -121,6 +138,7 @@ class _FakeBootstrapApiService implements BootstrapApiService {
           longitude: 139.70,
           address: '東京都北区',
           designTags: const <String>['tag-design-1'],
+          coverPhotoId: 'photo-cover-north',
         ),
         _building(
           id: 'south',
@@ -161,6 +179,50 @@ class _FakeBootstrapApiService implements BootstrapApiService {
   void close() {}
 }
 
+class _FakeBuildingCoverPhotoApiService
+    implements BuildingCoverPhotoApiService {
+  int callCount = 0;
+  List<String>? lastPhotoIds;
+
+  @override
+  Future<Map<String, BuildingCoverThumbnailData>> getCoverPhotoThumbnails({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required List<String> photoIds,
+  }) async {
+    callCount += 1;
+    lastPhotoIds = List<String>.from(photoIds);
+    return <String, BuildingCoverThumbnailData>{
+      for (final String photoId in photoIds)
+        photoId: BuildingCoverThumbnailData(
+          photoId: photoId,
+          fileName: '$photoId.png',
+          mimeType: 'image/png',
+          byteSize: _pngBytes.length,
+          bytes: _pngBytes,
+          source: 'thumbnail',
+        ),
+    };
+  }
+
+  @override
+  Future<void> updateBuildingCoverPhoto({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String photoId,
+  }) async {}
+
+  @override
+  void close() {}
+}
+
+final Uint8List _pngBytes = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);
+
 Building _building({
   required String id,
   required String name,
@@ -168,6 +230,7 @@ Building _building({
   required double? longitude,
   String? address,
   List<String> designTags = const <String>[],
+  String? coverPhotoId,
 }) {
   return Building(
     buildingId: id,
@@ -180,7 +243,7 @@ Building _building({
     salesTags: const <String>[],
     constructionTags: const <String>[],
     driveFolderId: null,
-    coverPhotoId: null,
+    coverPhotoId: coverPhotoId,
     createdAt: null,
     updatedAt: null,
     isDeleted: false,

@@ -17,9 +17,28 @@ var PHOTO_THUMBNAIL_ALLOWED_MIME_TYPES_ = {
 function handleGetPhotoThumbnailData(requestId, payload, authContext) {
   requireAuthenticatedContext_(authContext);
   var photoId = getBuildingDetailRequiredId_(payload, 'photoId');
-  var spreadsheet = getDataSpreadsheet_();
+
+  return createApiResponse(
+    true,
+    requestId,
+    getPhotoThumbnailResponseData_(photoId),
+    null,
+    null
+  );
+}
+
+/**
+ * 1枚分のサムネイル応答データを作る。
+ * 代表写真の一括取得でも同じ検証を再利用する。
+ *
+ * @param {string} photoId
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet=} spreadsheet
+ * @return {Object}
+ */
+function getPhotoThumbnailResponseData_(photoId, spreadsheet) {
+  var dataSpreadsheet = spreadsheet || getDataSpreadsheet_();
   var photoRecord = findBuildingDetailSheetRecord_(
-    spreadsheet,
+    dataSpreadsheet,
     'Photos',
     'photoId',
     photoId
@@ -65,7 +84,7 @@ function handleGetPhotoThumbnailData(requestId, payload, authContext) {
     }
 
     file = getPhotoThumbnailDriveFile_(storageFileId);
-    var building = findBuildingDetailBuilding_(spreadsheet, buildingId);
+    var building = findBuildingDetailBuilding_(dataSpreadsheet, buildingId);
     var expectedFolderId = optionalSheetString_(building.driveFolderId);
     if (
       expectedFolderId === null ||
@@ -93,21 +112,15 @@ function handleGetPhotoThumbnailData(requestId, payload, authContext) {
     );
   }
 
-  return createApiResponse(
-    true,
-    requestId,
-    {
-      photoId: photoId,
-      fileName: file.getName(),
-      mimeType: mimeType,
-      byteSize: bytes.length,
-      base64Data: Utilities.base64Encode(bytes),
-      source: source,
-      stage: '5-2B'
-    },
-    null,
-    null
-  );
+  return {
+    photoId: photoId,
+    fileName: file.getName(),
+    mimeType: mimeType,
+    byteSize: bytes.length,
+    base64Data: Utilities.base64Encode(bytes),
+    source: source,
+    stage: '5-4A'
+  };
 }
 
 /**

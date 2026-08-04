@@ -8,6 +8,7 @@ import 'package:building_record_app/data/models/building_detail_data.dart';
 import 'package:building_record_app/data/models/building_tag.dart';
 import 'package:building_record_app/data/services/auth_service.dart';
 import 'package:building_record_app/data/services/bootstrap_api_service.dart';
+import 'package:building_record_app/data/services/building_cover_photo_api_service.dart';
 import 'package:building_record_app/data/services/building_detail_api_service.dart';
 import 'package:building_record_app/data/services/building_information_api_service.dart';
 import 'package:building_record_app/data/services/building_location_api_service.dart';
@@ -127,6 +128,50 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(apiService.detailCallCount, 3);
+  });
+
+  testWidgets('写真を建物の代表写真に設定できる', (WidgetTester tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 1000);
+    addTearDown(tester.view.reset);
+
+    final _FakeBuildingDetailApiService detailApiService =
+        _FakeBuildingDetailApiService();
+    final _FakeBuildingCoverPhotoApiService coverPhotoApiService =
+        _FakeBuildingCoverPhotoApiService(detailApiService);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BuildingDetailPage(
+          authService: _FakeAuthService(),
+          buildingId: 'building-12345678',
+          buildingDetailApiService: detailApiService,
+          buildingCoverPhotoApiService: coverPhotoApiService,
+          buildingLocationApiService: _FakeBuildingLocationApiService(),
+          enableNetworkTiles: false,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final Finder setCoverButton = find.byKey(
+      const ValueKey<String>('set-cover-photo-photo-00000001'),
+    );
+    await tester.ensureVisible(setCoverButton);
+    await tester.pumpAndSettle();
+    await tester.tap(setCoverButton);
+    await tester.pumpAndSettle();
+
+    expect(coverPhotoApiService.updateCallCount, 1);
+    expect(coverPhotoApiService.lastBuildingId, 'building-12345678');
+    expect(coverPhotoApiService.lastPhotoId, 'photo-00000001');
+    expect(detailApiService.detailCallCount, 2);
+    expect(find.text('代表写真を更新しました。'), findsOneWidget);
+
+    final IconButton updatedButton = tester.widget<IconButton>(setCoverButton);
+    expect(updatedButton.onPressed, isNull);
+    expect(find.byTooltip('代表写真に設定済み'), findsOneWidget);
   });
 
   testWidgets('建物名・住所・建物タグを編集できる', (WidgetTester tester) async {
@@ -334,6 +379,7 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
   int thumbnailCallCount = 0;
   int photoCallCount = 0;
   String? lastBuildingId;
+  String? coverPhotoId = 'photo-12345678';
 
   @override
   Future<BuildingDetailData> getBuildingDetail({
@@ -361,7 +407,7 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
         salesTags: const <String>[],
         constructionTags: const <String>['tag-construction-1234'],
         driveFolderId: 'drive-folder-12345678',
-        coverPhotoId: 'photo-12345678',
+        coverPhotoId: coverPhotoId,
         createdAt: null,
         updatedAt: null,
         isDeleted: false,
@@ -487,6 +533,43 @@ class _FakeBuildingDetailApiService implements BuildingDetailApiService {
       bytes: _pngBytes,
       stage: '4-2',
     );
+  }
+
+  @override
+  void close() {}
+}
+
+class _FakeBuildingCoverPhotoApiService
+    implements BuildingCoverPhotoApiService {
+  _FakeBuildingCoverPhotoApiService(this.detailApiService);
+
+  final _FakeBuildingDetailApiService detailApiService;
+  int updateCallCount = 0;
+  String? lastBuildingId;
+  String? lastPhotoId;
+
+  @override
+  Future<void> updateBuildingCoverPhoto({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String photoId,
+  }) async {
+    updateCallCount += 1;
+    lastBuildingId = buildingId;
+    lastPhotoId = photoId;
+    detailApiService.coverPhotoId = photoId;
+  }
+
+  @override
+  Future<Map<String, BuildingCoverThumbnailData>> getCoverPhotoThumbnails({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required List<String> photoIds,
+  }) async {
+    return const <String, BuildingCoverThumbnailData>{};
   }
 
   @override
