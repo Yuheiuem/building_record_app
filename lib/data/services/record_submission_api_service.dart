@@ -205,13 +205,22 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     RecordPreparationPayload? recordPreparation,
     bool finalizeAfterUpload = false,
   }) async {
-    final Stopwatch encodeStopwatch = Stopwatch()..start();
+    final Stopwatch preparationStopwatch = Stopwatch()..start();
+
+    final Stopwatch originalBase64Stopwatch = Stopwatch()..start();
     final String base64Data = base64Encode(bytes);
+    originalBase64Stopwatch.stop();
+
+    final Stopwatch thumbnailCreateStopwatch = Stopwatch()..start();
     final RecordThumbnailData? thumbnail = await _createThumbnailSafely(bytes);
+    thumbnailCreateStopwatch.stop();
+
+    final Stopwatch thumbnailBase64Stopwatch = Stopwatch()..start();
     final String? thumbnailBase64Data = thumbnail == null
         ? null
         : base64Encode(thumbnail.bytes);
-    encodeStopwatch.stop();
+    thumbnailBase64Stopwatch.stop();
+    preparationStopwatch.stop();
 
     final Stopwatch requestStopwatch = Stopwatch()..start();
     final Map<String, dynamic> response = await _post(
@@ -247,8 +256,11 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
 
     return UploadRecordPhotoResult.fromJson(
       _requiredData(response),
-      clientEncodeMs: encodeStopwatch.elapsedMilliseconds,
+      clientEncodeMs: preparationStopwatch.elapsedMilliseconds,
       clientRequestMs: requestStopwatch.elapsedMilliseconds,
+      clientOriginalBase64Ms: originalBase64Stopwatch.elapsedMilliseconds,
+      clientThumbnailCreateMs: thumbnailCreateStopwatch.elapsedMilliseconds,
+      clientThumbnailBase64Ms: thumbnailBase64Stopwatch.elapsedMilliseconds,
     );
   }
 

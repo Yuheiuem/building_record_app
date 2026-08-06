@@ -108,6 +108,10 @@ class RecordDraftController extends ChangeNotifier {
   final Map<String, UploadRecordPhotoResult> _photoUploadResults =
       <String, UploadRecordPhotoResult>{};
   Duration? _lastSubmissionDuration;
+  Duration? _lastPreparationDuration;
+  Duration? _lastPhotoUploadDuration;
+  Duration? _lastFinalizeDuration;
+  Duration? _lastCombinedSaveDuration;
   int _draftRevision = 0;
 
   UnmodifiableListView<RecordDraftPhoto> get photos =>
@@ -154,6 +158,10 @@ class RecordDraftController extends ChangeNotifier {
   String? get savedVisitId => _finalizeRecordResult?.visitId;
   int get draftRevision => _draftRevision;
   Duration? get lastSubmissionDuration => _lastSubmissionDuration;
+  Duration? get lastPreparationDuration => _lastPreparationDuration;
+  Duration? get lastPhotoUploadDuration => _lastPhotoUploadDuration;
+  Duration? get lastFinalizeDuration => _lastFinalizeDuration;
+  Duration? get lastCombinedSaveDuration => _lastCombinedSaveDuration;
   bool get submissionSucceeded =>
       _submissionPhase == RecordSubmissionPhase.succeeded;
   bool get isSubmitting =>
@@ -692,6 +700,10 @@ class RecordDraftController extends ChangeNotifier {
     _submissionErrorDetail = null;
     _submissionNoticeMessage = null;
     _lastSubmissionDuration = null;
+    _lastPreparationDuration = null;
+    _lastPhotoUploadDuration = null;
+    _lastFinalizeDuration = null;
+    _lastCombinedSaveDuration = null;
     _submissionPhase = RecordSubmissionPhase.starting;
     notifyListeners();
 
@@ -775,6 +787,7 @@ class RecordDraftController extends ChangeNotifier {
     _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploading;
     notifyListeners();
 
+    final Stopwatch combinedSaveStopwatch = Stopwatch()..start();
     try {
       final UploadRecordPhotoResult uploadResult =
           await _recordSubmissionApiService.uploadPhoto(
@@ -830,6 +843,9 @@ class RecordDraftController extends ChangeNotifier {
       _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
       notifyListeners();
       return <String>['${photo.fileName}: 不明なエラー'];
+    } finally {
+      combinedSaveStopwatch.stop();
+      _lastCombinedSaveDuration = combinedSaveStopwatch.elapsed;
     }
   }
 
@@ -841,36 +857,44 @@ class RecordDraftController extends ChangeNotifier {
       _submissionPhase = RecordSubmissionPhase.starting;
       notifyListeners();
 
-      final BeginRecordResult beginResult = await _recordSubmissionApiService
-          .beginRecord(
-            requestId: _beginRequestId!,
-            clientVersion: AppConfig.version,
-            idToken: idToken,
-            buildingMode: _buildingMode == RecordBuildingMode.newBuilding
-                ? 'new'
-                : 'existing',
-            buildingId: _submissionBuildingId!,
-            visitId: _submissionVisitId!,
-            buildingName: _buildingMode == RecordBuildingMode.newBuilding
-                ? _newBuildingName.trim()
-                : null,
-            designTagIds: _buildingTagIdsForSubmission(BuildingTagType.design),
-            salesTagIds: _buildingTagIdsForSubmission(BuildingTagType.sales),
-            constructionTagIds: _buildingTagIdsForSubmission(
-              BuildingTagType.construction,
-            ),
-            visitedAt: _submissionVisitedAt!,
-            triggerTagIds: _sortedIds(_selectedTriggerTagIds),
-            impression: _impression.trim(),
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracyM: location.accuracyM,
-            locationSource: location.source.apiValue,
-            expectedPhotoCount: _photos.length,
-          );
-      _beginRecordResult = beginResult;
-      _submissionBuildingId = beginResult.buildingId;
-      _submissionVisitId = beginResult.visitId;
+      final Stopwatch preparationStopwatch = Stopwatch()..start();
+      try {
+        final BeginRecordResult beginResult = await _recordSubmissionApiService
+            .beginRecord(
+              requestId: _beginRequestId!,
+              clientVersion: AppConfig.version,
+              idToken: idToken,
+              buildingMode: _buildingMode == RecordBuildingMode.newBuilding
+                  ? 'new'
+                  : 'existing',
+              buildingId: _submissionBuildingId!,
+              visitId: _submissionVisitId!,
+              buildingName: _buildingMode == RecordBuildingMode.newBuilding
+                  ? _newBuildingName.trim()
+                  : null,
+              designTagIds: _buildingTagIdsForSubmission(
+                BuildingTagType.design,
+              ),
+              salesTagIds: _buildingTagIdsForSubmission(BuildingTagType.sales),
+              constructionTagIds: _buildingTagIdsForSubmission(
+                BuildingTagType.construction,
+              ),
+              visitedAt: _submissionVisitedAt!,
+              triggerTagIds: _sortedIds(_selectedTriggerTagIds),
+              impression: _impression.trim(),
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracyM: location.accuracyM,
+              locationSource: location.source.apiValue,
+              expectedPhotoCount: _photos.length,
+            );
+        _beginRecordResult = beginResult;
+        _submissionBuildingId = beginResult.buildingId;
+        _submissionVisitId = beginResult.visitId;
+      } finally {
+        preparationStopwatch.stop();
+        _lastPreparationDuration = preparationStopwatch.elapsed;
+      }
     }
 
     final List<RecordDraftPhoto> pendingPhotos = _photos
@@ -882,48 +906,61 @@ class RecordDraftController extends ChangeNotifier {
         .toList(growable: false);
     final List<String> failedDetails = <String>[];
 
-    for (int offset = 0; offset < pendingPhotos.length; offset += 2) {
-      final int end = (offset + 2).clamp(0, pendingPhotos.length).toInt();
-      final List<RecordDraftPhoto> batch = pendingPhotos.sublist(offset, end);
-
-      _submissionPhase = RecordSubmissionPhase.uploading;
-      _currentUploadingPhotoId = batch.first.photoId;
-      for (final RecordDraftPhoto photo in batch) {
-        _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploading;
-      }
-      notifyListeners();
-
-      final List<_PhotoUploadAttempt> attempts = await Future.wait(
-        batch.map((RecordDraftPhoto photo) {
-          return _uploadPhotoForMultipleRecord(
-            idToken: idToken,
-            location: location,
-            photo: photo,
-            displayOrder: _photos.indexOf(photo) + 1,
+    if (pendingPhotos.isNotEmpty) {
+      final Stopwatch photoUploadStopwatch = Stopwatch()..start();
+      try {
+        for (int offset = 0; offset < pendingPhotos.length; offset += 2) {
+          final int end = (offset + 2).clamp(0, pendingPhotos.length).toInt();
+          final List<RecordDraftPhoto> batch = pendingPhotos.sublist(
+            offset,
+            end,
           );
-        }),
-      );
 
-      for (final _PhotoUploadAttempt attempt in attempts) {
-        final UploadRecordPhotoResult? result = attempt.result;
-        if (result != null) {
-          _applyUploadResult(attempt.photo, result);
-          continue;
+          _submissionPhase = RecordSubmissionPhase.uploading;
+          _currentUploadingPhotoId = batch.first.photoId;
+          for (final RecordDraftPhoto photo in batch) {
+            _photoUploadStatuses[photo.photoId] =
+                RecordPhotoUploadStatus.uploading;
+          }
+          notifyListeners();
+
+          final List<_PhotoUploadAttempt> attempts = await Future.wait(
+            batch.map((RecordDraftPhoto photo) {
+              return _uploadPhotoForMultipleRecord(
+                idToken: idToken,
+                location: location,
+                photo: photo,
+                displayOrder: _photos.indexOf(photo) + 1,
+              );
+            }),
+          );
+
+          for (final _PhotoUploadAttempt attempt in attempts) {
+            final UploadRecordPhotoResult? result = attempt.result;
+            if (result != null) {
+              _applyUploadResult(attempt.photo, result);
+              continue;
+            }
+
+            _photoUploadStatuses[attempt.photo.photoId] =
+                RecordPhotoUploadStatus.failed;
+            if (attempt.authenticationRequired) {
+              _markAuthenticationRequired(idToken);
+            }
+            failedDetails.add(
+              '${attempt.photo.fileName}: '
+              '${attempt.errorMessage ?? '不明なエラー'}',
+            );
+          }
+          notifyListeners();
+
+          if (failedDetails.isNotEmpty) {
+            return failedDetails;
+          }
         }
-
-        _photoUploadStatuses[attempt.photo.photoId] =
-            RecordPhotoUploadStatus.failed;
-        if (attempt.authenticationRequired) {
-          _markAuthenticationRequired(idToken);
-        }
-        failedDetails.add(
-          '${attempt.photo.fileName}: ${attempt.errorMessage ?? '不明なエラー'}',
-        );
-      }
-      notifyListeners();
-
-      if (failedDetails.isNotEmpty) {
-        return failedDetails;
+      } finally {
+        photoUploadStopwatch.stop();
+        _lastPhotoUploadDuration = photoUploadStopwatch.elapsed;
       }
     }
 
@@ -932,13 +969,20 @@ class RecordDraftController extends ChangeNotifier {
       _currentUploadingPhotoId = null;
       notifyListeners();
 
-      _finalizeRecordResult = await _recordSubmissionApiService.finalizeRecord(
-        requestId: _finalizeRequestId!,
-        clientVersion: AppConfig.version,
-        idToken: idToken,
-        buildingId: _submissionBuildingId!,
-        visitId: _submissionVisitId!,
-      );
+      final Stopwatch finalizeStopwatch = Stopwatch()..start();
+      try {
+        _finalizeRecordResult = await _recordSubmissionApiService
+            .finalizeRecord(
+              requestId: _finalizeRequestId!,
+              clientVersion: AppConfig.version,
+              idToken: idToken,
+              buildingId: _submissionBuildingId!,
+              visitId: _submissionVisitId!,
+            );
+      } finally {
+        finalizeStopwatch.stop();
+        _lastFinalizeDuration = finalizeStopwatch.elapsed;
+      }
     }
 
     return failedDetails;
@@ -1059,6 +1103,10 @@ class RecordDraftController extends ChangeNotifier {
     _photoUploadStatuses.clear();
     _photoUploadResults.clear();
     _lastSubmissionDuration = null;
+    _lastPreparationDuration = null;
+    _lastPhotoUploadDuration = null;
+    _lastFinalizeDuration = null;
+    _lastCombinedSaveDuration = null;
     _draftRevision += 1;
     notifyListeners();
 

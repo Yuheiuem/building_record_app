@@ -133,6 +133,8 @@ function createRecordUploadTimings_(authContext) {
     thumbnailBase64DecodeMs: 0,
     driveSaveMs: 0,
     thumbnailDriveSaveMs: 0,
+    spreadsheetOpenMs: 0,
+    responseCacheMs: 0,
     sheetWriteMs: 0,
     finalizeMs: 0
   };
@@ -201,7 +203,9 @@ function handleUploadPhotoLegacy_(
   timings,
   handlerStartedAt
 ) {
+  var spreadsheetOpenStartedAt = Date.now();
   var spreadsheet = getDataSpreadsheet_();
+  timings.spreadsheetOpenMs += Date.now() - spreadsheetOpenStartedAt;
   var lock = LockService.getScriptLock();
   var lockStartedAt = Date.now();
   lock.waitLock(30000);
@@ -497,7 +501,9 @@ function handleUploadPhotoParallelStep_(
   );
   timings.thumbnailDriveSaveMs += Date.now() - thumbnailStartedAt;
 
+  var spreadsheetOpenStartedAt = Date.now();
   var spreadsheet = getDataSpreadsheet_();
+  timings.spreadsheetOpenMs += Date.now() - spreadsheetOpenStartedAt;
   var lock = LockService.getScriptLock();
   var lockStartedAt = Date.now();
   lock.waitLock(30000);
@@ -593,7 +599,15 @@ function handleUploadPhotoParallelStep_(
       timings,
       handlerStartedAt
     );
+    var responseCacheStartedAt = Date.now();
     cacheRecordUploadResult_(normalized.requestId, result);
+    timings.responseCacheMs += Date.now() - responseCacheStartedAt;
+    attachUploadPerformance_(
+      result,
+      authContext,
+      timings,
+      handlerStartedAt
+    );
 
     return createApiResponse(true, requestId, result, null, null);
   } finally {
@@ -959,6 +973,8 @@ function attachUploadPerformance_(
     thumbnailDriveSaveMs: Number(
       timings.thumbnailDriveSaveMs
     ) || 0,
+    spreadsheetOpenMs: Number(timings.spreadsheetOpenMs) || 0,
+    responseCacheMs: Number(timings.responseCacheMs) || 0,
     sheetWriteMs: Number(timings.sheetWriteMs) || 0,
     finalizeMs: Number(timings.finalizeMs) || 0,
     handlerTotalMs: Date.now() - handlerStartedAt
@@ -2303,4 +2319,45 @@ function testNormalizeUploadPhotoThumbnailPayload() {
     thumbnailByteSize: normalized.thumbnailByteSize,
     hasThumbnailBase64: normalized.thumbnailBase64Data !== null
   }));
+}
+
+/**
+ * 段階5-4A.3の送信時間項目がレスポンスへ含まれることを確認する。
+ * DriveやSheetsは変更しない。
+ */
+function testRecordUploadPerformanceFields() {
+  var result = {};
+  var timings = {
+    authenticationMs: 11,
+    lockWaitMs: 12,
+    draftPreparationMs: 13,
+    lookupMs: 14,
+    base64DecodeMs: 15,
+    thumbnailBase64DecodeMs: 16,
+    driveSaveMs: 17,
+    thumbnailDriveSaveMs: 18,
+    spreadsheetOpenMs: 19,
+    responseCacheMs: 20,
+    sheetWriteMs: 21,
+    finalizeMs: 22
+  };
+  attachUploadPerformance_(
+    result,
+    {
+      verificationMode: 'cache',
+      verificationMs: 11
+    },
+    timings,
+    Date.now() - 50
+  );
+
+  if (
+    result.performance.spreadsheetOpenMs !== 19 ||
+    result.performance.responseCacheMs !== 20 ||
+    result.performance.thumbnailDriveSaveMs !== 18
+  ) {
+    throw new Error('送信時間項目をレスポンスへ設定できませんでした。');
+  }
+
+  console.log(JSON.stringify(result.performance));
 }

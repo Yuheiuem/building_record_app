@@ -45,6 +45,13 @@ class RecordUploadPerformance {
     required this.base64DecodeMs,
     required this.driveSaveMs,
     required this.sheetWriteMs,
+    this.clientOriginalBase64Ms = 0,
+    this.clientThumbnailCreateMs = 0,
+    this.clientThumbnailBase64Ms = 0,
+    this.spreadsheetOpenMs,
+    this.responseCacheMs,
+    this.thumbnailBase64DecodeMs,
+    this.thumbnailDriveSaveMs,
     this.draftPreparationMs,
     this.finalizeMs,
     required this.handlerTotalMs,
@@ -54,17 +61,27 @@ class RecordUploadPerformance {
     Map<String, dynamic>? json, {
     required int clientEncodeMs,
     required int clientRequestMs,
+    int clientOriginalBase64Ms = 0,
+    int clientThumbnailCreateMs = 0,
+    int clientThumbnailBase64Ms = 0,
   }) {
     final Map<String, dynamic> safe = json ?? const <String, dynamic>{};
     return RecordUploadPerformance(
       clientEncodeMs: clientEncodeMs,
       clientRequestMs: clientRequestMs,
+      clientOriginalBase64Ms: clientOriginalBase64Ms,
+      clientThumbnailCreateMs: clientThumbnailCreateMs,
+      clientThumbnailBase64Ms: clientThumbnailBase64Ms,
       authenticationMode: _optionalString(safe['authenticationMode']),
       authenticationMs: _optionalInt(safe['authenticationMs']),
       lockWaitMs: _optionalInt(safe['lockWaitMs']),
+      spreadsheetOpenMs: _optionalInt(safe['spreadsheetOpenMs']),
+      responseCacheMs: _optionalInt(safe['responseCacheMs']),
       lookupMs: _optionalInt(safe['lookupMs']),
       base64DecodeMs: _optionalInt(safe['base64DecodeMs']),
+      thumbnailBase64DecodeMs: _optionalInt(safe['thumbnailBase64DecodeMs']),
       driveSaveMs: _optionalInt(safe['driveSaveMs']),
+      thumbnailDriveSaveMs: _optionalInt(safe['thumbnailDriveSaveMs']),
       sheetWriteMs: _optionalInt(safe['sheetWriteMs']),
       draftPreparationMs: _optionalInt(safe['draftPreparationMs']),
       finalizeMs: _optionalInt(safe['finalizeMs']),
@@ -74,12 +91,19 @@ class RecordUploadPerformance {
 
   final int clientEncodeMs;
   final int clientRequestMs;
+  final int clientOriginalBase64Ms;
+  final int clientThumbnailCreateMs;
+  final int clientThumbnailBase64Ms;
   final String? authenticationMode;
   final int? authenticationMs;
   final int? lockWaitMs;
+  final int? spreadsheetOpenMs;
+  final int? responseCacheMs;
   final int? lookupMs;
   final int? base64DecodeMs;
+  final int? thumbnailBase64DecodeMs;
   final int? driveSaveMs;
+  final int? thumbnailDriveSaveMs;
   final int? sheetWriteMs;
   final int? draftPreparationMs;
   final int? finalizeMs;
@@ -89,6 +113,11 @@ class RecordUploadPerformance {
   Duration get clientRequestDuration => Duration(milliseconds: clientRequestMs);
   Duration get clientTotalDuration =>
       Duration(milliseconds: clientEncodeMs + clientRequestMs);
+
+  bool get hasClientBreakdown =>
+      clientOriginalBase64Ms > 0 ||
+      clientThumbnailCreateMs > 0 ||
+      clientThumbnailBase64Ms > 0;
 
   bool get hasServerBreakdown =>
       authenticationMode != null ||
@@ -119,6 +148,9 @@ class UploadRecordPhotoResult {
     Map<String, dynamic> json, {
     int clientEncodeMs = 0,
     int clientRequestMs = 0,
+    int clientOriginalBase64Ms = 0,
+    int clientThumbnailCreateMs = 0,
+    int clientThumbnailBase64Ms = 0,
   }) {
     final Object? performanceJson = json['performance'];
     return UploadRecordPhotoResult(
@@ -139,6 +171,9 @@ class UploadRecordPhotoResult {
         performanceJson is Map<String, dynamic> ? performanceJson : null,
         clientEncodeMs: clientEncodeMs,
         clientRequestMs: clientRequestMs,
+        clientOriginalBase64Ms: clientOriginalBase64Ms,
+        clientThumbnailCreateMs: clientThumbnailCreateMs,
+        clientThumbnailBase64Ms: clientThumbnailBase64Ms,
       ),
     );
   }

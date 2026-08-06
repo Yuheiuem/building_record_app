@@ -639,7 +639,8 @@ class _UploadPerformanceDetails extends StatelessWidget {
       }
     }
 
-    if (entries.isEmpty) {
+    final List<String> phaseDetails = _submissionPhaseDetails(controller);
+    if (entries.isEmpty && phaseDetails.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -655,58 +656,161 @@ class _UploadPerformanceDetails extends StatelessWidget {
         child: ExpansionTile(
           key: const Key('record-upload-performance'),
           title: const Text('送信時間の内訳'),
-          subtitle: const Text('通信・認証・Drive保存などを確認できます。'),
+          subtitle: const Text('準備・通信・Drive保存・サムネイル処理を確認できます。'),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          children: entries.map((entry) {
-            final RecordUploadPerformance performance = entry.performance;
-            final List<String> serverDetails = <String>[
-              if (performance.authenticationMode != null)
-                '認証 ${_authenticationModeLabel(performance.authenticationMode!)}',
-              if (performance.authenticationMs != null)
-                '認証処理 ${_formatMilliseconds(performance.authenticationMs!)}',
-              if (performance.draftPreparationMs != null &&
-                  performance.draftPreparationMs! > 0)
-                '準備 ${_formatMilliseconds(performance.draftPreparationMs!)}',
-              if (performance.lookupMs != null)
-                '検索 ${_formatMilliseconds(performance.lookupMs!)}',
-              if (performance.driveSaveMs != null)
-                'Drive ${_formatMilliseconds(performance.driveSaveMs!)}',
-              if (performance.sheetWriteMs != null)
-                'Sheets ${_formatMilliseconds(performance.sheetWriteMs!)}',
-              if (performance.finalizeMs != null && performance.finalizeMs! > 0)
-                '確定 ${_formatMilliseconds(performance.finalizeMs!)}',
-              if (performance.handlerTotalMs != null)
-                'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
-            ];
-
-            return Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    entry.photo.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'ブラウザ変換 ${_formatMilliseconds(performance.clientEncodeMs)} / '
-                    '通信全体 ${_formatMilliseconds(performance.clientRequestMs)}',
-                  ),
-                  if (serverDetails.isNotEmpty) ...<Widget>[
-                    const SizedBox(height: 2),
-                    Text(serverDetails.join(' / ')),
+          children: <Widget>[
+            if (phaseDetails.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const Text(
+                      '保存処理全体',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(phaseDetails.join(' / ')),
                   ],
-                ],
+                ),
               ),
-            );
-          }).toList(),
+            ...entries.map((entry) {
+              final RecordUploadPerformance performance = entry.performance;
+              final List<String> clientDetails = <String>[
+                if (performance.clientOriginalBase64Ms > 0)
+                  '元画像Base64 '
+                      '${_formatMilliseconds(performance.clientOriginalBase64Ms)}',
+                if (performance.clientThumbnailCreateMs > 0)
+                  'サムネ作成 '
+                      '${_formatMilliseconds(performance.clientThumbnailCreateMs)}',
+                if (performance.clientThumbnailBase64Ms > 0)
+                  'サムネBase64 '
+                      '${_formatMilliseconds(performance.clientThumbnailBase64Ms)}',
+              ];
+              final List<String> serverDetails = <String>[
+                if (performance.authenticationMode != null)
+                  '認証 '
+                      '${_authenticationModeLabel(performance.authenticationMode!)}',
+                if (performance.authenticationMs != null)
+                  '認証処理 '
+                      '${_formatMilliseconds(performance.authenticationMs!)}',
+                if (performance.base64DecodeMs != null)
+                  '元画像復号 '
+                      '${_formatMilliseconds(performance.base64DecodeMs!)}',
+                if (performance.thumbnailBase64DecodeMs != null &&
+                    performance.thumbnailBase64DecodeMs! > 0)
+                  'サムネ復号 '
+                      '${_formatMilliseconds(performance.thumbnailBase64DecodeMs!)}',
+                if (performance.spreadsheetOpenMs != null &&
+                    performance.spreadsheetOpenMs! > 0)
+                  'Spreadsheet接続 '
+                      '${_formatMilliseconds(performance.spreadsheetOpenMs!)}',
+                if (performance.lockWaitMs != null &&
+                    performance.lockWaitMs! > 0)
+                  'ロック待ち '
+                      '${_formatMilliseconds(performance.lockWaitMs!)}',
+                if (performance.draftPreparationMs != null &&
+                    performance.draftPreparationMs! > 0)
+                  '準備 '
+                      '${_formatMilliseconds(performance.draftPreparationMs!)}',
+                if (performance.lookupMs != null)
+                  '検索 ${_formatMilliseconds(performance.lookupMs!)}',
+                if (performance.driveSaveMs != null)
+                  '元画像Drive '
+                      '${_formatMilliseconds(performance.driveSaveMs!)}',
+                if (performance.thumbnailDriveSaveMs != null &&
+                    performance.thumbnailDriveSaveMs! > 0)
+                  'サムネDrive '
+                      '${_formatMilliseconds(performance.thumbnailDriveSaveMs!)}',
+                if (performance.sheetWriteMs != null)
+                  'Sheets ${_formatMilliseconds(performance.sheetWriteMs!)}',
+                if (performance.responseCacheMs != null &&
+                    performance.responseCacheMs! > 0)
+                  '結果キャッシュ '
+                      '${_formatMilliseconds(performance.responseCacheMs!)}',
+                if (performance.finalizeMs != null &&
+                    performance.finalizeMs! > 0)
+                  '確定 ${_formatMilliseconds(performance.finalizeMs!)}',
+                if (performance.handlerTotalMs != null)
+                  'サーバー合計 '
+                      '${_formatMilliseconds(performance.handlerTotalMs!)}',
+              ];
+
+              return Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Text(
+                      entry.photo.fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'ブラウザ準備 '
+                      '${_formatMilliseconds(performance.clientEncodeMs)} / '
+                      '通信全体 '
+                      '${_formatMilliseconds(performance.clientRequestMs)}',
+                    ),
+                    if (clientDetails.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(clientDetails.join(' / ')),
+                    ],
+                    if (serverDetails.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(serverDetails.join(' / ')),
+                    ],
+                  ],
+                ),
+              );
+            }),
+          ],
         ),
       ),
     );
   }
+}
+
+List<String> _submissionPhaseDetails(RecordDraftController controller) {
+  final List<String> result = <String>[];
+  final Duration? combined = controller.lastCombinedSaveDuration;
+  if (combined != null) {
+    result.add('一括保存通信 ${_formatElapsed(combined)}');
+  } else {
+    final Duration? preparation = controller.lastPreparationDuration;
+    final Duration? photoUpload = controller.lastPhotoUploadDuration;
+    final Duration? finalize = controller.lastFinalizeDuration;
+    if (preparation != null) {
+      result.add('準備通信 ${_formatElapsed(preparation)}');
+    }
+    if (photoUpload != null) {
+      result.add('写真送信区間 ${_formatElapsed(photoUpload)}');
+    }
+    if (finalize != null) {
+      result.add('確定通信 ${_formatElapsed(finalize)}');
+    }
+  }
+
+  final Duration? total = controller.lastSubmissionDuration;
+  if (total != null) {
+    final int measuredMs =
+        <Duration?>[
+          combined,
+          controller.lastPreparationDuration,
+          controller.lastPhotoUploadDuration,
+          controller.lastFinalizeDuration,
+        ].whereType<Duration>().fold<int>(
+          0,
+          (int sum, Duration duration) => sum + duration.inMilliseconds,
+        );
+    final int otherMs = total.inMilliseconds - measuredMs;
+    if (otherMs > 0) {
+      result.add('画面側その他 ${_formatMilliseconds(otherMs)}');
+    }
+  }
+  return result;
 }
 
 String _formatElapsed(Duration duration) {
