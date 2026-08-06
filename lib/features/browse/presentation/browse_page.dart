@@ -14,7 +14,6 @@ import '../../../data/models/building.dart';
 import '../../../data/models/building_tag.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/bootstrap_api_service.dart';
-import '../../../data/services/building_cover_photo_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../domain/browse_map_logic.dart';
 
@@ -22,7 +21,6 @@ class BrowsePage extends StatefulWidget {
   const BrowsePage({
     required this.authService,
     this.bootstrapApiService,
-    this.buildingCoverPhotoApiService,
     this.enableNetworkTiles = true,
     this.onOpenBuilding,
     super.key,
@@ -30,7 +28,6 @@ class BrowsePage extends StatefulWidget {
 
   final AuthService authService;
   final BootstrapApiService? bootstrapApiService;
-  final BuildingCoverPhotoApiService? buildingCoverPhotoApiService;
   final bool enableNetworkTiles;
   final ValueChanged<Building>? onOpenBuilding;
 
@@ -43,13 +40,6 @@ class _BrowsePageState extends State<BrowsePage> {
 
   late final BootstrapApiService _bootstrapApiService;
   late final bool _ownsBootstrapApiService;
-  late final BuildingCoverPhotoApiService _coverPhotoApiService;
-  late final bool _ownsCoverPhotoApiService;
-
-  final Map<String, BuildingCoverThumbnailData> _coverThumbnails =
-      <String, BuildingCoverThumbnailData>{};
-  final Set<String> _loadingCoverPhotoIds = <String>{};
-  final Set<String> _failedCoverPhotoIds = <String>{};
 
   BootstrapData? _bootstrapData;
   BrowseMapBounds? _visibleBounds;
@@ -65,10 +55,6 @@ class _BrowsePageState extends State<BrowsePage> {
     _ownsBootstrapApiService = widget.bootstrapApiService == null;
     _bootstrapApiService =
         widget.bootstrapApiService ?? HttpBootstrapApiService();
-    _ownsCoverPhotoApiService = widget.buildingCoverPhotoApiService == null;
-    _coverPhotoApiService =
-        widget.buildingCoverPhotoApiService ??
-        HttpBuildingCoverPhotoApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadBootstrapData();
@@ -80,9 +66,6 @@ class _BrowsePageState extends State<BrowsePage> {
     _mapUpdateTimer?.cancel();
     if (_ownsBootstrapApiService) {
       _bootstrapApiService.close();
-    }
-    if (_ownsCoverPhotoApiService) {
-      _coverPhotoApiService.close();
     }
     super.dispose();
   }
@@ -119,13 +102,9 @@ class _BrowsePageState extends State<BrowsePage> {
       setState(() {
         _bootstrapData = result;
         _visibleBounds = boundsForBuildings(result.buildings);
-        _coverThumbnails.clear();
-        _loadingCoverPhotoIds.clear();
-        _failedCoverPhotoIds.clear();
         _isLoading = false;
         _mapRevision += 1;
       });
-      _scheduleVisibleCoverThumbnailLoad();
     } on BootstrapApiException catch (error) {
       if (!mounted) {
         return;
@@ -162,7 +141,6 @@ class _BrowsePageState extends State<BrowsePage> {
       setState(() {
         _visibleBounds = nextBounds;
       });
-      _scheduleVisibleCoverThumbnailLoad();
     });
   }
 
@@ -188,93 +166,6 @@ class _BrowsePageState extends State<BrowsePage> {
               !building.isDeleted && !buildingHasCoordinates(building),
         )
         .length;
-  }
-
-  void _scheduleVisibleCoverThumbnailLoad() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(_loadVisibleCoverThumbnails());
-    });
-  }
-
-  Future<void> _loadVisibleCoverThumbnails() async {
-    final String? idToken = widget.authService.idToken;
-    if (idToken == null || idToken.isEmpty) {
-      return;
-    }
-
-    final List<String> pendingPhotoIds = _visibleBuildings
-        .map((Building building) => building.coverPhotoId)
-        .whereType<String>()
-        .where((String photoId) => photoId.isNotEmpty)
-        .where(
-          (String photoId) =>
-              !_coverThumbnails.containsKey(photoId) &&
-              !_loadingCoverPhotoIds.contains(photoId) &&
-              !_failedCoverPhotoIds.contains(photoId),
-        )
-        .toSet()
-        .take(4)
-        .toList(growable: false);
-    if (pendingPhotoIds.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _loadingCoverPhotoIds.addAll(pendingPhotoIds);
-    });
-
-    try {
-      final Map<String, BuildingCoverThumbnailData> result =
-          await _coverPhotoApiService.getCoverPhotoThumbnails(
-            requestId: const Uuid().v4(),
-            clientVersion: AppConfig.version,
-            idToken: idToken,
-            photoIds: pendingPhotoIds,
-          );
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _coverThumbnails.addAll(result);
-        for (final String photoId in pendingPhotoIds) {
-          if (!result.containsKey(photoId)) {
-            _failedCoverPhotoIds.add(photoId);
-          }
-        }
-      });
-    } on BuildingCoverPhotoApiException {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _failedCoverPhotoIds.addAll(pendingPhotoIds);
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _failedCoverPhotoIds.addAll(pendingPhotoIds);
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loadingCoverPhotoIds.removeAll(pendingPhotoIds);
-        });
-        _scheduleVisibleCoverThumbnailLoad();
-      }
-    }
-  }
-
-  void _retryCoverThumbnail(String photoId) {
-    setState(() {
-      _failedCoverPhotoIds.remove(photoId);
-      _coverThumbnails.remove(photoId);
-    });
-    _scheduleVisibleCoverThumbnailLoad();
   }
 
   void _openBuilding(Building building) {
@@ -324,7 +215,6 @@ class _BrowsePageState extends State<BrowsePage> {
                 setState(() {
                   _searchQuery = value;
                 });
-                _scheduleVisibleCoverThumbnailLoad();
               },
             );
 
@@ -335,10 +225,6 @@ class _BrowsePageState extends State<BrowsePage> {
               markerBuildings: _markerBuildings,
               visibleBuildings: shownBuildings,
               tagsById: tagsById,
-              coverThumbnails: _coverThumbnails,
-              loadingCoverPhotoIds: _loadingCoverPhotoIds,
-              failedCoverPhotoIds: _failedCoverPhotoIds,
-              onRetryCoverPhoto: _retryCoverThumbnail,
               visibleBounds: _visibleBounds,
               mapRevision: _mapRevision,
               enableNetworkTiles: widget.enableNetworkTiles,
@@ -566,10 +452,6 @@ class _BrowseWorkspace extends StatelessWidget {
     required this.markerBuildings,
     required this.visibleBuildings,
     required this.tagsById,
-    required this.coverThumbnails,
-    required this.loadingCoverPhotoIds,
-    required this.failedCoverPhotoIds,
-    required this.onRetryCoverPhoto,
     required this.visibleBounds,
     required this.mapRevision,
     required this.enableNetworkTiles,
@@ -583,10 +465,6 @@ class _BrowseWorkspace extends StatelessWidget {
   final List<Building> markerBuildings;
   final List<Building> visibleBuildings;
   final Map<String, BuildingTag> tagsById;
-  final Map<String, BuildingCoverThumbnailData> coverThumbnails;
-  final Set<String> loadingCoverPhotoIds;
-  final Set<String> failedCoverPhotoIds;
-  final ValueChanged<String> onRetryCoverPhoto;
   final BrowseMapBounds? visibleBounds;
   final int mapRevision;
   final bool enableNetworkTiles;
@@ -607,10 +485,6 @@ class _BrowseWorkspace extends StatelessWidget {
     final Widget list = _VisibleBuildingListCard(
       buildings: visibleBuildings,
       tagsById: tagsById,
-      coverThumbnails: coverThumbnails,
-      loadingCoverPhotoIds: loadingCoverPhotoIds,
-      failedCoverPhotoIds: failedCoverPhotoIds,
-      onRetryCoverPhoto: onRetryCoverPhoto,
       fillAvailableHeight: wideLayout,
       onOpenBuilding: onOpenBuilding,
     );
@@ -1006,20 +880,12 @@ class _VisibleBuildingListCard extends StatelessWidget {
   const _VisibleBuildingListCard({
     required this.buildings,
     required this.tagsById,
-    required this.coverThumbnails,
-    required this.loadingCoverPhotoIds,
-    required this.failedCoverPhotoIds,
-    required this.onRetryCoverPhoto,
     required this.fillAvailableHeight,
     required this.onOpenBuilding,
   });
 
   final List<Building> buildings;
   final Map<String, BuildingTag> tagsById;
-  final Map<String, BuildingCoverThumbnailData> coverThumbnails;
-  final Set<String> loadingCoverPhotoIds;
-  final Set<String> failedCoverPhotoIds;
-  final ValueChanged<String> onRetryCoverPhoto;
   final bool fillAvailableHeight;
   final ValueChanged<Building> onOpenBuilding;
 
@@ -1041,20 +907,6 @@ class _VisibleBuildingListCard extends StatelessWidget {
               return _BuildingListItem(
                 building: buildings[index],
                 tagsById: tagsById,
-                coverThumbnail: buildings[index].coverPhotoId == null
-                    ? null
-                    : coverThumbnails[buildings[index].coverPhotoId],
-                isCoverThumbnailLoading:
-                    buildings[index].coverPhotoId != null &&
-                    loadingCoverPhotoIds.contains(
-                      buildings[index].coverPhotoId,
-                    ),
-                didCoverThumbnailFail:
-                    buildings[index].coverPhotoId != null &&
-                    failedCoverPhotoIds.contains(buildings[index].coverPhotoId),
-                onRetryCoverPhoto: buildings[index].coverPhotoId == null
-                    ? null
-                    : () => onRetryCoverPhoto(buildings[index].coverPhotoId!),
                 onOpenBuilding: onOpenBuilding,
               );
             },
@@ -1135,92 +987,15 @@ class _BuildingListEmptyState extends StatelessWidget {
   }
 }
 
-class _BuildingCoverThumbnail extends StatelessWidget {
-  const _BuildingCoverThumbnail({
-    required this.buildingId,
-    required this.hasCoverPhoto,
-    required this.data,
-    required this.isLoading,
-    required this.didFail,
-    required this.onRetry,
-  });
-
-  final String buildingId;
-  final bool hasCoverPhoto;
-  final BuildingCoverThumbnailData? data;
-  final bool isLoading;
-  final bool didFail;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    Widget child;
-    if (data != null) {
-      child = Image.memory(
-        data!.bytes,
-        key: ValueKey<String>('browse-cover-photo-image-$buildingId'),
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder:
-            (BuildContext context, Object error, StackTrace? stackTrace) {
-              return Icon(Icons.broken_image, color: colorScheme.primary);
-            },
-      );
-    } else if (isLoading) {
-      child = const Center(
-        child: SizedBox.square(
-          dimension: 22,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    } else if (hasCoverPhoto && didFail) {
-      child = IconButton(
-        key: ValueKey<String>('retry-browse-cover-photo-$buildingId'),
-        tooltip: '代表写真を再取得',
-        onPressed: onRetry,
-        icon: const Icon(Icons.refresh),
-      );
-    } else {
-      child = Icon(
-        Icons.apartment_outlined,
-        color: colorScheme.primary,
-        size: 32,
-      );
-    }
-
-    return Container(
-      key: ValueKey<String>('browse-cover-photo-$buildingId'),
-      width: 72,
-      height: 72,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colorScheme.outlineVariant),
-      ),
-      child: Center(child: child),
-    );
-  }
-}
-
 class _BuildingListItem extends StatelessWidget {
   const _BuildingListItem({
     required this.building,
     required this.tagsById,
-    required this.coverThumbnail,
-    required this.isCoverThumbnailLoading,
-    required this.didCoverThumbnailFail,
-    required this.onRetryCoverPhoto,
     required this.onOpenBuilding,
   });
 
   final Building building;
   final Map<String, BuildingTag> tagsById;
-  final BuildingCoverThumbnailData? coverThumbnail;
-  final bool isCoverThumbnailLoading;
-  final bool didCoverThumbnailFail;
-  final VoidCallback? onRetryCoverPhoto;
   final ValueChanged<Building> onOpenBuilding;
 
   @override
@@ -1243,15 +1018,14 @@ class _BuildingListItem extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              _BuildingCoverThumbnail(
-                buildingId: building.buildingId,
-                hasCoverPhoto: building.coverPhotoId != null,
-                data: coverThumbnail,
-                isLoading: isCoverThumbnailLoading,
-                didFail: didCoverThumbnailFail,
-                onRetry: onRetryCoverPhoto,
+              Icon(
+                Icons.apartment_outlined,
+                key: ValueKey<String>(
+                  'browse-building-icon-${building.buildingId}',
+                ),
+                color: colorScheme.primary,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
