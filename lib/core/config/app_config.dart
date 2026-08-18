@@ -1,14 +1,13 @@
 abstract final class AppConfig {
   static const String workingTitle = '建築記録Webアプリ';
-  static const String version = 'v0.19.3';
-  static const String stage = '段階 5-4A.3';
+  static const String version = 'v0.19.4';
+  static const String stage = '段階 5-4A.4';
   static const int driveSpikeMaxPhotoBytes = 2 * 1024 * 1024;
 
   // 正式な記録画面で選択する写真の初期設定。
   static const int recordImageMaxDimension = 1600;
   static const int recordImageQuality = 75;
   static const int recordMaxPhotoBytes = 5 * 1024 * 1024;
-
   // 建物詳細ギャラリー用サムネイルの生成設定。
   static const int recordThumbnailMaxDimension = 480;
   static const int recordThumbnailQuality = 68;
@@ -19,7 +18,6 @@ abstract final class AppConfig {
   static const double recordMapDefaultLatitude = 35.681236;
   static const double recordMapDefaultLongitude = 139.767125;
   static const double recordMapDefaultZoom = 17;
-
   // OAuth WebクライアントIDは公開識別子です。
   // クライアントシークレットやアクセストークンはここへ置きません。
   static const String googleOAuthClientId =

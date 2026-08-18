@@ -21,12 +21,10 @@ function doGet() {
  */
 function doPost(e) {
   var requestId = null;
-
   try {
     var request = parseJsonRequest(e);
     requestId = getOptionalString(request.requestId);
     var authContext = verifyRequestAuthentication(request);
-
     switch (request.action) {
       case 'healthCheck':
         return handleHealthCheck(requestId, authContext);
@@ -114,6 +112,12 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'uploadPhotoThumbnail':
+        return handleUploadPhotoThumbnail(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'finalizeRecord':
         return handleFinalizeRecord(
           requestId,
@@ -133,7 +137,6 @@ function doPost(e) {
     var message = error && typeof error.message === 'string'
       ? error.message
       : 'リクエストを処理できませんでした。';
-
     return createApiResponse(
       false,
       requestId,
@@ -153,13 +156,12 @@ function doPost(e) {
  */
 function handleHealthCheck(requestId, authContext) {
   requireAuthenticatedContext_(authContext);
-
   return createApiResponse(
     true,
     requestId,
     {
       status: 'ok',
-      stage: '5-4A',
+      stage: '5-4A.4',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -197,7 +199,6 @@ function parseJsonRequest(e) {
       'POST本文が正しいJSONではありません。'
     );
   }
-
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw createApiError_(
       'VALIDATION_ERROR',
@@ -260,7 +261,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.19.0',
+        clientVersion: 'v0.19.4',
         payload: {}
       })
     }

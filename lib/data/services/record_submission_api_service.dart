@@ -125,10 +125,12 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     http.Client? client,
     Uri? endpoint,
     RecordThumbnailService? thumbnailService,
+    Duration deferredThumbnailQuietDelay = const Duration(seconds: 12),
   }) : _client = client ?? http.Client(),
        _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl),
        _thumbnailService =
-           thumbnailService ?? const ImageRecordThumbnailService();
+           thumbnailService ?? const ImageRecordThumbnailService(),
+       _deferredThumbnailQuietDelay = deferredThumbnailQuietDelay;
 
   static const Duration _normalTimeout = Duration(seconds: 30);
   static const Duration _uploadTimeout = Duration(seconds: 60);
@@ -136,6 +138,14 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
   final http.Client _client;
   final Uri _endpoint;
   final RecordThumbnailService _thumbnailService;
+  final Duration _deferredThumbnailQuietDelay;
+  final List<_DeferredThumbnailUpload> _deferredThumbnailUploads =
+      <_DeferredThumbnailUpload>[];
+
+  int _activePrimaryRequests = 0;
+  bool _thumbnailDrainScheduled = false;
+  bool _thumbnailDrainRunning = false;
+  bool _closed = false;
 
   @override
   Future<BeginRecordResult> beginRecord({
@@ -158,31 +168,33 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     required String locationSource,
     required int expectedPhotoCount,
   }) async {
-    final Map<String, dynamic> response = await _post(
-      action: 'beginRecord',
-      requestId: requestId,
-      clientVersion: clientVersion,
-      idToken: idToken,
-      payload: <String, Object?>{
-        'buildingMode': buildingMode,
-        'buildingId': buildingId,
-        'visitId': visitId,
-        'buildingName': buildingName,
-        'designTagIds': designTagIds,
-        'salesTagIds': salesTagIds,
-        'constructionTagIds': constructionTagIds,
-        'visitedAt': visitedAt.toIso8601String(),
-        'triggerTagIds': triggerTagIds,
-        'impression': impression,
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracyM': accuracyM,
-        'locationSource': locationSource,
-        'expectedPhotoCount': expectedPhotoCount,
-      },
-      timeout: _normalTimeout,
-    );
-    return BeginRecordResult.fromJson(_requiredData(response));
+    return _runPrimaryRequest<BeginRecordResult>(() async {
+      final Map<String, dynamic> response = await _post(
+        action: 'beginRecord',
+        requestId: requestId,
+        clientVersion: clientVersion,
+        idToken: idToken,
+        payload: <String, Object?>{
+          'buildingMode': buildingMode,
+          'buildingId': buildingId,
+          'visitId': visitId,
+          'buildingName': buildingName,
+          'designTagIds': designTagIds,
+          'salesTagIds': salesTagIds,
+          'constructionTagIds': constructionTagIds,
+          'visitedAt': visitedAt.toIso8601String(),
+          'triggerTagIds': triggerTagIds,
+          'impression': impression,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracyM': accuracyM,
+          'locationSource': locationSource,
+          'expectedPhotoCount': expectedPhotoCount,
+        },
+        timeout: _normalTimeout,
+      );
+      return BeginRecordResult.fromJson(_requiredData(response));
+    });
   }
 
   @override
@@ -206,70 +218,183 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     bool finalizeAfterUpload = false,
   }) async {
     final Stopwatch preparationStopwatch = Stopwatch()..start();
-
     final Stopwatch originalBase64Stopwatch = Stopwatch()..start();
     final String base64Data = base64Encode(bytes);
     originalBase64Stopwatch.stop();
-
-    final Stopwatch thumbnailCreateStopwatch = Stopwatch()..start();
-    final RecordThumbnailData? thumbnail = await _createThumbnailSafely(bytes);
-    thumbnailCreateStopwatch.stop();
-
-    final Stopwatch thumbnailBase64Stopwatch = Stopwatch()..start();
-    final String? thumbnailBase64Data = thumbnail == null
-        ? null
-        : base64Encode(thumbnail.bytes);
-    thumbnailBase64Stopwatch.stop();
     preparationStopwatch.stop();
 
     final Stopwatch requestStopwatch = Stopwatch()..start();
-    final Map<String, dynamic> response = await _post(
-      action: 'uploadPhoto',
-      requestId: requestId,
-      clientVersion: clientVersion,
-      idToken: idToken,
-      payload: <String, Object?>{
-        'buildingId': buildingId,
-        'visitId': visitId,
-        'photoId': photoId,
-        'fileName': fileName,
-        'mimeType': mimeType,
-        'byteSize': bytes.length,
-        'base64Data': base64Data,
-        if (thumbnail != null) 'thumbnailMimeType': thumbnail.mimeType,
-        if (thumbnail != null) 'thumbnailByteSize': thumbnail.byteSize,
-        if (thumbnailBase64Data != null)
-          'thumbnailBase64Data': thumbnailBase64Data,
-        'takenAt': takenAt.toIso8601String(),
-        'latitude': latitude,
-        'longitude': longitude,
-        'accuracyM': accuracyM,
-        'locationSource': locationSource,
-        'displayOrder': displayOrder,
-        if (recordPreparation != null)
-          'recordDraft': recordPreparation.toJson(),
-        if (finalizeAfterUpload) 'finalizeAfterUpload': true,
-      },
-      timeout: _uploadTimeout,
-    );
+    final Map<String, dynamic> response =
+        await _runPrimaryRequest<Map<String, dynamic>>(() {
+          return _post(
+            action: 'uploadPhoto',
+            requestId: requestId,
+            clientVersion: clientVersion,
+            idToken: idToken,
+            payload: <String, Object?>{
+              'buildingId': buildingId,
+              'visitId': visitId,
+              'photoId': photoId,
+              'fileName': fileName,
+              'mimeType': mimeType,
+              'byteSize': bytes.length,
+              'base64Data': base64Data,
+              'takenAt': takenAt.toIso8601String(),
+              'latitude': latitude,
+              'longitude': longitude,
+              'accuracyM': accuracyM,
+              'locationSource': locationSource,
+              'displayOrder': displayOrder,
+              if (recordPreparation != null)
+                'recordDraft': recordPreparation.toJson(),
+              if (finalizeAfterUpload) 'finalizeAfterUpload': true,
+            },
+            timeout: _uploadTimeout,
+          );
+        });
     requestStopwatch.stop();
 
-    return UploadRecordPhotoResult.fromJson(
+    final UploadRecordPhotoResult result = UploadRecordPhotoResult.fromJson(
       _requiredData(response),
       clientEncodeMs: preparationStopwatch.elapsedMilliseconds,
       clientRequestMs: requestStopwatch.elapsedMilliseconds,
       clientOriginalBase64Ms: originalBase64Stopwatch.elapsedMilliseconds,
-      clientThumbnailCreateMs: thumbnailCreateStopwatch.elapsedMilliseconds,
-      clientThumbnailBase64Ms: thumbnailBase64Stopwatch.elapsedMilliseconds,
+      clientThumbnailCreateMs: 0,
+      clientThumbnailBase64Ms: 0,
     );
+
+    unawaited(
+      _prepareDeferredThumbnail(
+        requestId: requestId,
+        clientVersion: clientVersion,
+        idToken: idToken,
+        buildingId: buildingId,
+        visitId: visitId,
+        photoId: photoId,
+        sourceBytes: bytes,
+      ),
+    );
+
+    return result;
   }
 
   Future<RecordThumbnailData?> _createThumbnailSafely(Uint8List bytes) async {
     try {
       return await _thumbnailService.createThumbnail(bytes);
     } catch (_) {
-      // 元写真の送信を優先し、サムネイル生成失敗だけでは中断しない。
       return null;
+    }
+  }
+
+  Future<void> _prepareDeferredThumbnail({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+    required String buildingId,
+    required String visitId,
+    required String photoId,
+    required Uint8List sourceBytes,
+  }) async {
+    if (_closed) {
+      return;
+    }
+
+    final RecordThumbnailData? thumbnail = await _createThumbnailSafely(
+      sourceBytes,
+    );
+    if (_closed || thumbnail == null) {
+      return;
+    }
+
+    _deferredThumbnailUploads.removeWhere(
+      (_DeferredThumbnailUpload item) => item.photoId == photoId,
+    );
+    _deferredThumbnailUploads.add(
+      _DeferredThumbnailUpload(
+        requestId: '$requestId-thumbnail',
+        clientVersion: clientVersion,
+        idToken: idToken,
+        buildingId: buildingId,
+        visitId: visitId,
+        photoId: photoId,
+        thumbnail: thumbnail,
+      ),
+    );
+    _scheduleDeferredThumbnailDrain();
+  }
+
+  Future<T> _runPrimaryRequest<T>(Future<T> Function() action) async {
+    _activePrimaryRequests += 1;
+    try {
+      return await action();
+    } finally {
+      _activePrimaryRequests -= 1;
+      _scheduleDeferredThumbnailDrain();
+    }
+  }
+
+  void _scheduleDeferredThumbnailDrain() {
+    if (_closed ||
+        _deferredThumbnailUploads.isEmpty ||
+        _thumbnailDrainScheduled ||
+        _thumbnailDrainRunning) {
+      return;
+    }
+
+    _thumbnailDrainScheduled = true;
+    unawaited(
+      Future<void>.delayed(_deferredThumbnailQuietDelay, () async {
+        _thumbnailDrainScheduled = false;
+        if (_closed || _deferredThumbnailUploads.isEmpty) {
+          return;
+        }
+        if (_activePrimaryRequests > 0) {
+          _scheduleDeferredThumbnailDrain();
+          return;
+        }
+        await _drainDeferredThumbnails();
+      }),
+    );
+  }
+
+  Future<void> _drainDeferredThumbnails() async {
+    if (_closed || _thumbnailDrainRunning) {
+      return;
+    }
+
+    _thumbnailDrainRunning = true;
+    try {
+      while (!_closed &&
+          _activePrimaryRequests == 0 &&
+          _deferredThumbnailUploads.isNotEmpty) {
+        final _DeferredThumbnailUpload item = _deferredThumbnailUploads
+            .removeAt(0);
+        try {
+          await _post(
+            action: 'uploadPhotoThumbnail',
+            requestId: item.requestId,
+            clientVersion: item.clientVersion,
+            idToken: item.idToken,
+            payload: <String, Object?>{
+              'buildingId': item.buildingId,
+              'visitId': item.visitId,
+              'photoId': item.photoId,
+              'thumbnailMimeType': item.thumbnail.mimeType,
+              'thumbnailByteSize': item.thumbnail.byteSize,
+              'thumbnailBase64Data': base64Encode(item.thumbnail.bytes),
+            },
+            timeout: _uploadTimeout,
+          );
+        } catch (_) {
+          // サムネイル後送信は記録保存の成否に影響させない。
+          // 未作成分は既存のメンテナンス処理で後から補完できる。
+        }
+      }
+    } finally {
+      _thumbnailDrainRunning = false;
+      if (!_closed && _deferredThumbnailUploads.isNotEmpty) {
+        _scheduleDeferredThumbnailDrain();
+      }
     }
   }
 
@@ -281,15 +406,20 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     required String buildingId,
     required String visitId,
   }) async {
-    final Map<String, dynamic> response = await _post(
-      action: 'finalizeRecord',
-      requestId: requestId,
-      clientVersion: clientVersion,
-      idToken: idToken,
-      payload: <String, Object?>{'buildingId': buildingId, 'visitId': visitId},
-      timeout: _normalTimeout,
-    );
-    return FinalizeRecordResult.fromJson(_requiredData(response));
+    return _runPrimaryRequest<FinalizeRecordResult>(() async {
+      final Map<String, dynamic> response = await _post(
+        action: 'finalizeRecord',
+        requestId: requestId,
+        clientVersion: clientVersion,
+        idToken: idToken,
+        payload: <String, Object?>{
+          'buildingId': buildingId,
+          'visitId': visitId,
+        },
+        timeout: _normalTimeout,
+      );
+      return FinalizeRecordResult.fromJson(_requiredData(response));
+    });
   }
 
   Future<Map<String, dynamic>> _post({
@@ -307,7 +437,6 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
       'clientVersion': clientVersion,
       'payload': payload,
     });
-
     try {
       final http.Response response = await _client
           .post(
@@ -318,7 +447,6 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
             body: requestBody,
           )
           .timeout(timeout);
-
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw RecordSubmissionApiException(
           'Apps ScriptがHTTP ${response.statusCode}を返しました。',
@@ -372,8 +500,30 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
 
   @override
   void close() {
+    _closed = true;
+    _deferredThumbnailUploads.clear();
     _client.close();
   }
+}
+
+class _DeferredThumbnailUpload {
+  const _DeferredThumbnailUpload({
+    required this.requestId,
+    required this.clientVersion,
+    required this.idToken,
+    required this.buildingId,
+    required this.visitId,
+    required this.photoId,
+    required this.thumbnail,
+  });
+
+  final String requestId;
+  final String clientVersion;
+  final String idToken;
+  final String buildingId;
+  final String visitId;
+  final String photoId;
+  final RecordThumbnailData thumbnail;
 }
 
 class RecordSubmissionApiException implements Exception {
