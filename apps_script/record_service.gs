@@ -26,31 +26,88 @@ var RECORD_UPLOAD_RESULT_CACHE_PREFIX = 'record-upload-result:';
  */
 function handleBeginRecord(requestId, payload, authContext) {
   requireAuthenticatedContext_(authContext);
+  var handlerStartedAt = Date.now();
+  var performance = {
+    authenticationMode: getOptionalString(authContext.verificationMode)
+      || 'tokeninfo',
+    authenticationMs: Number(authContext.verificationMs) || 0,
+    normalizeMs: 0,
+    spreadsheetOpenMs: 0,
+    lockWaitMs: 0,
+    requestLookupMs: 0,
+    tagValidationMs: 0,
+    buildingEnsureMs: 0,
+    visitEnsureMs: 0,
+    uploadContextCacheMs: 0,
+    requestLogWriteMs: 0,
+    handlerTotalMs: 0,
+    unclassifiedMs: 0
+  };
+
+  var normalizeStartedAt = Date.now();
   var normalized = normalizeBeginRecordPayload_(requestId, payload);
+  performance.normalizeMs = Date.now() - normalizeStartedAt;
+
+  var spreadsheetStartedAt = Date.now();
   var spreadsheet = getDataSpreadsheet_();
+  performance.spreadsheetOpenMs = Date.now() - spreadsheetStartedAt;
+
   var lock = LockService.getScriptLock();
+  var lockStartedAt = Date.now();
   lock.waitLock(20000);
+  performance.lockWaitMs = Date.now() - lockStartedAt;
 
   try {
+    var requestLookupStartedAt = Date.now();
     var cached = getRequestResult_(
       spreadsheet,
       normalized.requestId,
       'beginRecord'
     );
+    performance.requestLookupMs = Date.now() - requestLookupStartedAt;
     if (cached !== null) {
       cached.reused = true;
+      performance.handlerTotalMs = Date.now() - handlerStartedAt;
+      performance.unclassifiedMs = Math.max(
+        0,
+        performance.handlerTotalMs
+          - performance.normalizeMs
+          - performance.spreadsheetOpenMs
+          - performance.lockWaitMs
+          - performance.requestLookupMs
+      );
+      cached.performance = performance;
+      console.log(
+        'RECORD_BEGIN_PERFORMANCE '
+          + JSON.stringify({
+            requestId: normalized.requestId,
+            reused: true,
+            performance: performance
+          })
+      );
       return createApiResponse(true, requestId, cached, null, null);
     }
 
+    var tagValidationStartedAt = Date.now();
     validateRecordTagIds_(spreadsheet, normalized);
+    performance.tagValidationMs = Date.now() - tagValidationStartedAt;
 
+    var buildingStartedAt = Date.now();
     var buildingResult = ensureRecordBuilding_(spreadsheet, normalized);
+    performance.buildingEnsureMs = Date.now() - buildingStartedAt;
+
+    var visitStartedAt = Date.now();
     var visitResult = ensureRecordVisit_(spreadsheet, normalized);
+    performance.visitEnsureMs = Date.now() - visitStartedAt;
+
+    var contextCacheStartedAt = Date.now();
     cacheRecordUploadContext_(
       normalized.buildingId,
       normalized.visitId,
       buildingResult.folderId
     );
+    performance.uploadContextCacheMs = Date.now() - contextCacheStartedAt;
+
     var result = {
       buildingId: normalized.buildingId,
       visitId: normalized.visitId,
@@ -58,9 +115,11 @@ function handleBeginRecord(requestId, payload, authContext) {
       buildingCreated: buildingResult.created,
       visitCreated: visitResult.created,
       reused: false,
-      stage: '5-2A'
+      stage: '5-4A.5',
+      performance: performance
     };
 
+    var requestWriteStartedAt = Date.now();
     appendRequestResult_(
       spreadsheet,
       normalized.requestId,
@@ -71,6 +130,32 @@ function handleBeginRecord(requestId, payload, authContext) {
         visitId: normalized.visitId
       },
       true
+    );
+    performance.requestLogWriteMs = Date.now() - requestWriteStartedAt;
+    performance.handlerTotalMs = Date.now() - handlerStartedAt;
+    performance.unclassifiedMs = Math.max(
+      0,
+      performance.handlerTotalMs
+        - performance.normalizeMs
+        - performance.spreadsheetOpenMs
+        - performance.lockWaitMs
+        - performance.requestLookupMs
+        - performance.tagValidationMs
+        - performance.buildingEnsureMs
+        - performance.visitEnsureMs
+        - performance.uploadContextCacheMs
+        - performance.requestLogWriteMs
+    );
+
+    console.log(
+      'RECORD_BEGIN_PERFORMANCE '
+        + JSON.stringify({
+          requestId: normalized.requestId,
+          reused: false,
+          buildingCreated: buildingResult.created,
+          visitCreated: visitResult.created,
+          performance: performance
+        })
     );
 
     return createApiResponse(true, requestId, result, null, null);
@@ -991,34 +1076,86 @@ function attachUploadPerformance_(
  */
 function handleFinalizeRecord(requestId, payload, authContext) {
   requireAuthenticatedContext_(authContext);
+  var handlerStartedAt = Date.now();
+  var performance = {
+    authenticationMode: getOptionalString(authContext.verificationMode)
+      || 'tokeninfo',
+    authenticationMs: Number(authContext.verificationMs) || 0,
+    normalizeMs: 0,
+    spreadsheetOpenMs: 0,
+    lockWaitMs: 0,
+    requestLookupMs: 0,
+    buildingLookupMs: 0,
+    visitLookupMs: 0,
+    photosLookupMs: 0,
+    visitUpdateMs: 0,
+    buildingUpdateMs: 0,
+    requestLogWriteMs: 0,
+    handlerTotalMs: 0,
+    unclassifiedMs: 0
+  };
+
+  var normalizeStartedAt = Date.now();
   var normalized = normalizeFinalizeRecordPayload_(requestId, payload);
+  performance.normalizeMs = Date.now() - normalizeStartedAt;
+
+  var spreadsheetStartedAt = Date.now();
   var spreadsheet = getDataSpreadsheet_();
+  performance.spreadsheetOpenMs = Date.now() - spreadsheetStartedAt;
+
   var lock = LockService.getScriptLock();
+  var lockStartedAt = Date.now();
   lock.waitLock(20000);
+  performance.lockWaitMs = Date.now() - lockStartedAt;
 
   try {
+    var requestLookupStartedAt = Date.now();
     var cached = getRequestResult_(
       spreadsheet,
       normalized.requestId,
       'finalizeRecord'
     );
+    performance.requestLookupMs = Date.now() - requestLookupStartedAt;
     if (cached !== null) {
       cached.reused = true;
+      performance.handlerTotalMs = Date.now() - handlerStartedAt;
+      performance.unclassifiedMs = Math.max(
+        0,
+        performance.handlerTotalMs
+          - performance.normalizeMs
+          - performance.spreadsheetOpenMs
+          - performance.lockWaitMs
+          - performance.requestLookupMs
+      );
+      cached.performance = performance;
+      console.log(
+        'RECORD_FINALIZE_PERFORMANCE '
+          + JSON.stringify({
+            requestId: normalized.requestId,
+            reused: true,
+            performance: performance
+          })
+      );
       return createApiResponse(true, requestId, cached, null, null);
     }
 
+    var buildingLookupStartedAt = Date.now();
     var buildingRecord = requireActiveSheetRecord_(
       spreadsheet,
       'Buildings',
       'buildingId',
       normalized.buildingId
     );
+    performance.buildingLookupMs = Date.now() - buildingLookupStartedAt;
+
+    var visitLookupStartedAt = Date.now();
     var visitRecord = requireActiveSheetRecord_(
       spreadsheet,
       'Visits',
       'visitId',
       normalized.visitId
     );
+    performance.visitLookupMs = Date.now() - visitLookupStartedAt;
 
     if (String(visitRecord.object.buildingId) !== normalized.buildingId) {
       throw createApiError_(
@@ -1027,6 +1164,7 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       );
     }
 
+    var photosLookupStartedAt = Date.now();
     var photos = readSheetRecordsByField_(
       spreadsheet,
       'Photos',
@@ -1035,8 +1173,9 @@ function handleFinalizeRecord(requestId, payload, authContext) {
     ).filter(function(record) {
       return !sheetBoolean_(record.object.isDeleted);
     });
-    var expectedPhotoCount = Number(visitRecord.object.expectedPhotoCount);
+    performance.photosLookupMs = Date.now() - photosLookupStartedAt;
 
+    var expectedPhotoCount = Number(visitRecord.object.expectedPhotoCount);
     if (photos.length !== expectedPhotoCount) {
       throw createApiError_(
         'CONFLICT',
@@ -1047,12 +1186,14 @@ function handleFinalizeRecord(requestId, payload, authContext) {
     var visitValues = visitRecord.values.slice();
     visitValues[9] = 'completed';
     visitValues[12] = new Date();
+    var visitUpdateStartedAt = Date.now();
     updateSheetRecord_(
       spreadsheet,
       'Visits',
       visitRecord.rowNumber,
       visitValues
     );
+    performance.visitUpdateMs = Date.now() - visitUpdateStartedAt;
 
     var buildingValues = buildingRecord.values.slice();
     if (isBlankSheetCell_(buildingValues[10]) && photos.length > 0) {
@@ -1063,12 +1204,14 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       buildingValues[10] = String(photos[0].object.photoId);
     }
     buildingValues[12] = new Date();
+    var buildingUpdateStartedAt = Date.now();
     updateSheetRecord_(
       spreadsheet,
       'Buildings',
       buildingRecord.rowNumber,
       buildingValues
     );
+    performance.buildingUpdateMs = Date.now() - buildingUpdateStartedAt;
 
     var result = {
       buildingId: normalized.buildingId,
@@ -1076,9 +1219,11 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       photoCount: photos.length,
       status: 'completed',
       reused: false,
-      stage: '5-2A'
+      stage: '5-4A.5',
+      performance: performance
     };
 
+    var requestWriteStartedAt = Date.now();
     appendRequestResult_(
       spreadsheet,
       normalized.requestId,
@@ -1089,6 +1234,32 @@ function handleFinalizeRecord(requestId, payload, authContext) {
         visitId: normalized.visitId
       },
       true
+    );
+    performance.requestLogWriteMs = Date.now() - requestWriteStartedAt;
+    performance.handlerTotalMs = Date.now() - handlerStartedAt;
+    performance.unclassifiedMs = Math.max(
+      0,
+      performance.handlerTotalMs
+        - performance.normalizeMs
+        - performance.spreadsheetOpenMs
+        - performance.lockWaitMs
+        - performance.requestLookupMs
+        - performance.buildingLookupMs
+        - performance.visitLookupMs
+        - performance.photosLookupMs
+        - performance.visitUpdateMs
+        - performance.buildingUpdateMs
+        - performance.requestLogWriteMs
+    );
+
+    console.log(
+      'RECORD_FINALIZE_PERFORMANCE '
+        + JSON.stringify({
+          requestId: normalized.requestId,
+          reused: false,
+          photoCount: photos.length,
+          performance: performance
+        })
     );
 
     return createApiResponse(true, requestId, result, null, null);
@@ -2360,4 +2531,18 @@ function testRecordUploadPerformanceFields() {
   }
 
   console.log(JSON.stringify(result.performance));
+}
+
+/**
+ * 段階5-4A.5の準備・確定通信診断コードが読み込まれていることを確認する。
+ */
+function testRecordPhaseDiagnosticsPatchLoaded() {
+  console.log(JSON.stringify({
+    ok: true,
+    stage: '5-4A.5',
+    markers: [
+      'RECORD_BEGIN_PERFORMANCE',
+      'RECORD_FINALIZE_PERFORMANCE'
+    ]
+  }));
 }

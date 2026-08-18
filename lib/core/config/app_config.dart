@@ -1,9 +1,8 @@
 abstract final class AppConfig {
   static const String workingTitle = '建築記録Webアプリ';
-  static const String version = 'v0.19.4';
-  static const String stage = '段階 5-4A.4';
+  static const String version = 'v0.19.5';
+  static const String stage = '段階 5-4A.5';
   static const int driveSpikeMaxPhotoBytes = 2 * 1024 * 1024;
-
   // 正式な記録画面で選択する写真の初期設定。
   static const int recordImageMaxDimension = 1600;
   static const int recordImageQuality = 75;
@@ -13,7 +12,6 @@ abstract final class AppConfig {
   static const int recordThumbnailQuality = 68;
   static const int recordThumbnailMinQuality = 40;
   static const int recordThumbnailMaxBytes = 256 * 1024;
-
   // 記録画面の手動位置指定マップ初期値（東京駅付近）。
   static const double recordMapDefaultLatitude = 35.681236;
   static const double recordMapDefaultLongitude = 139.767125;
