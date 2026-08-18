@@ -640,7 +640,14 @@ class _UploadPerformanceDetails extends StatelessWidget {
     }
 
     final List<String> phaseDetails = _submissionPhaseDetails(controller);
-    if (entries.isEmpty && phaseDetails.isEmpty) {
+    final RecordPhasePerformance? beginPerformance =
+        controller.beginRecordPerformance;
+    final RecordPhasePerformance? finalizePerformance =
+        controller.finalizeRecordPerformance;
+    if (entries.isEmpty &&
+        phaseDetails.isEmpty &&
+        beginPerformance == null &&
+        finalizePerformance == null) {
       return const SizedBox.shrink();
     }
 
@@ -656,7 +663,7 @@ class _UploadPerformanceDetails extends StatelessWidget {
         child: ExpansionTile(
           key: const Key('record-upload-performance'),
           title: const Text('送信時間の内訳'),
-          subtitle: const Text('準備・通信・Drive保存・サムネイル処理を確認できます。'),
+          subtitle: const Text('準備・写真送信・確定・Drive保存の詳細を確認できます。'),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           children: <Widget>[
             if (phaseDetails.isNotEmpty)
@@ -673,6 +680,18 @@ class _UploadPerformanceDetails extends StatelessWidget {
                     Text(phaseDetails.join(' / ')),
                   ],
                 ),
+              ),
+            if (beginPerformance != null)
+              _RecordPhasePerformanceSection(
+                key: const Key('record-begin-performance'),
+                title: '準備通信のサーバー内訳',
+                details: _beginRecordPerformanceDetails(beginPerformance),
+              ),
+            if (finalizePerformance != null)
+              _RecordPhasePerformanceSection(
+                key: const Key('record-finalize-performance'),
+                title: '確定通信のサーバー内訳',
+                details: _finalizeRecordPerformanceDetails(finalizePerformance),
               ),
             ...entries.map((entry) {
               final RecordUploadPerformance performance = entry.performance;
@@ -771,6 +790,102 @@ class _UploadPerformanceDetails extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RecordPhasePerformanceSection extends StatelessWidget {
+  const _RecordPhasePerformanceSection({
+    required this.title,
+    required this.details,
+    super.key,
+  });
+
+  final String title;
+  final List<String> details;
+
+  @override
+  Widget build(BuildContext context) {
+    if (details.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(details.join(' / ')),
+        ],
+      ),
+    );
+  }
+}
+
+List<String> _beginRecordPerformanceDetails(
+  RecordPhasePerformance performance,
+) {
+  return <String>[
+    ..._recordPhaseCommonDetails(performance),
+    if (performance.requestLookupMs != null)
+      'Requests検索 ${_formatMilliseconds(performance.requestLookupMs!)}',
+    if (performance.tagValidationMs != null)
+      'タグ検証 ${_formatMilliseconds(performance.tagValidationMs!)}',
+    if (performance.buildingEnsureMs != null)
+      '建物処理 ${_formatMilliseconds(performance.buildingEnsureMs!)}',
+    if (performance.visitEnsureMs != null)
+      'Visit処理 ${_formatMilliseconds(performance.visitEnsureMs!)}',
+    if (performance.uploadContextCacheMs != null)
+      '写真送信用キャッシュ '
+          '${_formatMilliseconds(performance.uploadContextCacheMs!)}',
+    if (performance.requestLogWriteMs != null)
+      'Requests書込 ${_formatMilliseconds(performance.requestLogWriteMs!)}',
+    if (performance.unclassifiedMs != null)
+      '未分類 ${_formatMilliseconds(performance.unclassifiedMs!)}',
+    if (performance.handlerTotalMs != null)
+      'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
+  ];
+}
+
+List<String> _finalizeRecordPerformanceDetails(
+  RecordPhasePerformance performance,
+) {
+  return <String>[
+    ..._recordPhaseCommonDetails(performance),
+    if (performance.requestLookupMs != null)
+      'Requests検索 ${_formatMilliseconds(performance.requestLookupMs!)}',
+    if (performance.buildingLookupMs != null)
+      'Buildings検索 ${_formatMilliseconds(performance.buildingLookupMs!)}',
+    if (performance.visitLookupMs != null)
+      'Visits検索 ${_formatMilliseconds(performance.visitLookupMs!)}',
+    if (performance.photosLookupMs != null)
+      'Photos検索 ${_formatMilliseconds(performance.photosLookupMs!)}',
+    if (performance.visitUpdateMs != null)
+      'Visit更新 ${_formatMilliseconds(performance.visitUpdateMs!)}',
+    if (performance.buildingUpdateMs != null)
+      'Building更新 ${_formatMilliseconds(performance.buildingUpdateMs!)}',
+    if (performance.requestLogWriteMs != null)
+      'Requests書込 ${_formatMilliseconds(performance.requestLogWriteMs!)}',
+    if (performance.unclassifiedMs != null)
+      '未分類 ${_formatMilliseconds(performance.unclassifiedMs!)}',
+    if (performance.handlerTotalMs != null)
+      'サーバー合計 ${_formatMilliseconds(performance.handlerTotalMs!)}',
+  ];
+}
+
+List<String> _recordPhaseCommonDetails(RecordPhasePerformance performance) {
+  return <String>[
+    if (performance.authenticationMode != null)
+      '認証 ${_authenticationModeLabel(performance.authenticationMode!)}',
+    if (performance.authenticationMs != null)
+      '認証処理 ${_formatMilliseconds(performance.authenticationMs!)}',
+    if (performance.normalizeMs != null)
+      '正規化 ${_formatMilliseconds(performance.normalizeMs!)}',
+    if (performance.spreadsheetOpenMs != null)
+      'Spreadsheet接続 '
+          '${_formatMilliseconds(performance.spreadsheetOpenMs!)}',
+    if (performance.lockWaitMs != null)
+      'ロック待ち ${_formatMilliseconds(performance.lockWaitMs!)}',
+  ];
 }
 
 List<String> _submissionPhaseDetails(RecordDraftController controller) {

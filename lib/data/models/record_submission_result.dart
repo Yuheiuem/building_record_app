@@ -9,6 +9,7 @@ class BeginRecordResult {
     required this.buildingCreated,
     required this.visitCreated,
     required this.reused,
+    this.performance,
   });
 
   factory BeginRecordResult.fromJson(Map<String, dynamic> json) {
@@ -22,6 +23,7 @@ class BeginRecordResult {
       buildingCreated: json['buildingCreated'] == true,
       visitCreated: json['visitCreated'] == true,
       reused: json['reused'] == true,
+      performance: RecordPhasePerformance.fromJsonValue(json['performance']),
     );
   }
 
@@ -31,6 +33,76 @@ class BeginRecordResult {
   final bool buildingCreated;
   final bool visitCreated;
   final bool reused;
+  final RecordPhasePerformance? performance;
+}
+
+@immutable
+class RecordPhasePerformance {
+  const RecordPhasePerformance({
+    this.authenticationMode,
+    this.authenticationMs,
+    this.normalizeMs,
+    this.spreadsheetOpenMs,
+    this.lockWaitMs,
+    this.requestLookupMs,
+    this.tagValidationMs,
+    this.buildingEnsureMs,
+    this.visitEnsureMs,
+    this.uploadContextCacheMs,
+    this.buildingLookupMs,
+    this.visitLookupMs,
+    this.photosLookupMs,
+    this.visitUpdateMs,
+    this.buildingUpdateMs,
+    this.requestLogWriteMs,
+    this.handlerTotalMs,
+    this.unclassifiedMs,
+  });
+
+  static RecordPhasePerformance? fromJsonValue(Object? value) {
+    if (value is! Map<String, dynamic>) {
+      return null;
+    }
+    return RecordPhasePerformance(
+      authenticationMode: _optionalString(value['authenticationMode']),
+      authenticationMs: _optionalInt(value['authenticationMs']),
+      normalizeMs: _optionalInt(value['normalizeMs']),
+      spreadsheetOpenMs: _optionalInt(value['spreadsheetOpenMs']),
+      lockWaitMs: _optionalInt(value['lockWaitMs']),
+      requestLookupMs: _optionalInt(value['requestLookupMs']),
+      tagValidationMs: _optionalInt(value['tagValidationMs']),
+      buildingEnsureMs: _optionalInt(value['buildingEnsureMs']),
+      visitEnsureMs: _optionalInt(value['visitEnsureMs']),
+      uploadContextCacheMs: _optionalInt(value['uploadContextCacheMs']),
+      buildingLookupMs: _optionalInt(value['buildingLookupMs']),
+      visitLookupMs: _optionalInt(value['visitLookupMs']),
+      photosLookupMs: _optionalInt(value['photosLookupMs']),
+      visitUpdateMs: _optionalInt(value['visitUpdateMs']),
+      buildingUpdateMs: _optionalInt(value['buildingUpdateMs']),
+      requestLogWriteMs: _optionalInt(value['requestLogWriteMs']),
+      handlerTotalMs: _optionalInt(value['handlerTotalMs']),
+      unclassifiedMs: _optionalInt(value['unclassifiedMs']),
+    );
+  }
+
+  final String? authenticationMode;
+  final int? authenticationMs;
+  final int? normalizeMs;
+  final int? spreadsheetOpenMs;
+  final int? lockWaitMs;
+  final int? requestLookupMs;
+  final int? tagValidationMs;
+  final int? buildingEnsureMs;
+  final int? visitEnsureMs;
+  final int? uploadContextCacheMs;
+  final int? buildingLookupMs;
+  final int? visitLookupMs;
+  final int? photosLookupMs;
+  final int? visitUpdateMs;
+  final int? buildingUpdateMs;
+  final int? requestLogWriteMs;
+  final int? handlerTotalMs;
+  final int? unclassifiedMs;
 }
 
 @immutable
@@ -202,6 +274,7 @@ class FinalizeRecordResult {
     required this.photoCount,
     required this.status,
     required this.reused,
+    this.performance,
   });
 
   factory FinalizeRecordResult.fromJson(Map<String, dynamic> json) {
@@ -211,6 +284,7 @@ class FinalizeRecordResult {
       photoCount: _requiredInt(json['photoCount'], 'photoCount'),
       status: _requiredString(json['status'], 'status'),
       reused: json['reused'] == true,
+      performance: RecordPhasePerformance.fromJsonValue(json['performance']),
     );
   }
 
@@ -219,6 +293,7 @@ class FinalizeRecordResult {
   final int photoCount;
   final String status;
   final bool reused;
+  final RecordPhasePerformance? performance;
 }
 
 String _requiredString(Object? value, String fieldName) {

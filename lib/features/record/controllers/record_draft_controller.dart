@@ -162,6 +162,10 @@ class RecordDraftController extends ChangeNotifier {
   Duration? get lastPhotoUploadDuration => _lastPhotoUploadDuration;
   Duration? get lastFinalizeDuration => _lastFinalizeDuration;
   Duration? get lastCombinedSaveDuration => _lastCombinedSaveDuration;
+  RecordPhasePerformance? get beginRecordPerformance =>
+      _beginRecordResult?.performance;
+  RecordPhasePerformance? get finalizeRecordPerformance =>
+      _finalizeRecordResult?.performance;
   bool get submissionSucceeded =>
       _submissionPhase == RecordSubmissionPhase.succeeded;
   bool get isSubmitting =>
