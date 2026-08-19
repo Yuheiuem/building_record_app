@@ -104,7 +104,9 @@ function handleBeginRecord(requestId, payload, authContext) {
     cacheRecordUploadContext_(
       normalized.buildingId,
       normalized.visitId,
-      buildingResult.folderId
+      buildingResult.folderId,
+      buildingResult.rowNumber,
+      visitResult.rowNumber
     );
     performance.uploadContextCacheMs = Date.now() - contextCacheStartedAt;
 
@@ -115,7 +117,7 @@ function handleBeginRecord(requestId, payload, authContext) {
       buildingCreated: buildingResult.created,
       visitCreated: visitResult.created,
       reused: false,
-      stage: '5-4A.5',
+      stage: '5-4A.8',
       performance: performance
     };
 
@@ -846,30 +848,65 @@ function recordUploadContextCacheKey_(buildingId, visitId) {
     + visitId;
 }
 
-function cacheRecordUploadContext_(buildingId, visitId, folderId) {
+function normalizeCachedRowNumber_(value) {
+  var rowNumber = Number(value);
+  if (!Number.isInteger(rowNumber) || rowNumber < 2) {
+    return null;
+  }
+  return rowNumber;
+}
+
+function cacheRecordUploadContext_(
+  buildingId,
+  visitId,
+  folderId,
+  buildingRowNumber,
+  visitRowNumber
+) {
   if (!folderId) {
     return;
   }
   CacheService.getScriptCache().put(
     recordUploadContextCacheKey_(buildingId, visitId),
-    JSON.stringify({ folderId: String(folderId) }),
+    JSON.stringify({
+      folderId: String(folderId),
+      buildingRowNumber: normalizeCachedRowNumber_(buildingRowNumber),
+      visitRowNumber: normalizeCachedRowNumber_(visitRowNumber)
+    }),
     RECORD_UPLOAD_CACHE_SECONDS
   );
 }
 
-function resolveRecordUploadContext_(buildingId, visitId) {
+function getCachedRecordUploadContext_(buildingId, visitId) {
   var cache = CacheService.getScriptCache();
   var cacheKey = recordUploadContextCacheKey_(buildingId, visitId);
   var cachedText = cache.get(cacheKey);
-  if (cachedText !== null) {
-    try {
-      var cached = JSON.parse(cachedText);
-      if (cached && cached.folderId) {
-        return { folderId: String(cached.folderId) };
-      }
-    } catch (ignore) {
+  if (cachedText === null) {
+    return null;
+  }
+  try {
+    var cached = JSON.parse(cachedText);
+    if (!cached || !cached.folderId) {
       cache.remove(cacheKey);
+      return null;
     }
+    return {
+      folderId: String(cached.folderId),
+      buildingRowNumber: normalizeCachedRowNumber_(
+        cached.buildingRowNumber
+      ),
+      visitRowNumber: normalizeCachedRowNumber_(cached.visitRowNumber)
+    };
+  } catch (ignore) {
+    cache.remove(cacheKey);
+    return null;
+  }
+}
+
+function resolveRecordUploadContext_(buildingId, visitId) {
+  var cached = getCachedRecordUploadContext_(buildingId, visitId);
+  if (cached !== null) {
+    return cached;
   }
 
   var spreadsheet = getDataSpreadsheet_();
@@ -912,8 +949,18 @@ function resolveRecordUploadContext_(buildingId, visitId) {
     }
   }
 
-  cacheRecordUploadContext_(buildingId, visitId, folderId);
-  return { folderId: folderId };
+  cacheRecordUploadContext_(
+    buildingId,
+    visitId,
+    folderId,
+    buildingRecord.rowNumber,
+    visitRecord.rowNumber
+  );
+  return {
+    folderId: folderId,
+    buildingRowNumber: buildingRecord.rowNumber,
+    visitRowNumber: visitRecord.rowNumber
+  };
 }
 
 function recordUploadResultCacheKey_(requestId) {
@@ -1139,21 +1186,28 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       return createApiResponse(true, requestId, cached, null, null);
     }
 
+    var uploadContext = getCachedRecordUploadContext_(
+      normalized.buildingId,
+      normalized.visitId
+    );
+
     var buildingLookupStartedAt = Date.now();
-    var buildingRecord = requireActiveSheetRecord_(
+    var buildingRecord = requireActiveSheetRecordWithCachedRow_(
       spreadsheet,
       'Buildings',
       'buildingId',
-      normalized.buildingId
+      normalized.buildingId,
+      uploadContext === null ? null : uploadContext.buildingRowNumber
     );
     performance.buildingLookupMs = Date.now() - buildingLookupStartedAt;
 
     var visitLookupStartedAt = Date.now();
-    var visitRecord = requireActiveSheetRecord_(
+    var visitRecord = requireActiveSheetRecordWithCachedRow_(
       spreadsheet,
       'Visits',
       'visitId',
-      normalized.visitId
+      normalized.visitId,
+      uploadContext === null ? null : uploadContext.visitRowNumber
     );
     performance.visitLookupMs = Date.now() - visitLookupStartedAt;
 
@@ -1219,7 +1273,7 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       photoCount: photos.length,
       status: 'completed',
       reused: false,
-      stage: '5-4A.5',
+      stage: '5-4A.8',
       performance: performance
     };
 
@@ -1489,7 +1543,8 @@ function ensureRecordBuilding_(spreadsheet, payload) {
       return {
         created: false,
         record: existing,
-        folderId: existingFolderId
+        folderId: existingFolderId,
+        rowNumber: existing.rowNumber
       };
     }
 
@@ -1510,11 +1565,16 @@ function ensureRecordBuilding_(spreadsheet, payload) {
       now,
       false
     ];
-    appendSheetRow_(spreadsheet, 'Buildings', row);
+    var newBuildingRowNumber = appendSheetRow_(
+      spreadsheet,
+      'Buildings',
+      row
+    );
     return {
       created: true,
       record: null,
-      folderId: folder.getId()
+      folderId: folder.getId(),
+      rowNumber: newBuildingRowNumber
     };
   }
 
@@ -1556,7 +1616,8 @@ function ensureRecordBuilding_(spreadsheet, payload) {
   return {
     created: false,
     record: existing,
-    folderId: String(values[9])
+    folderId: String(values[9]),
+    rowNumber: existing.rowNumber
   };
 }
 
@@ -1574,7 +1635,11 @@ function ensureRecordVisit_(spreadsheet, payload) {
         'visitIdが別の建物で使用されています。'
       );
     }
-    return { created: false, record: existing };
+    return {
+      created: false,
+      record: existing,
+      rowNumber: existing.rowNumber
+    };
   }
 
   var now = new Date();
@@ -1594,8 +1659,12 @@ function ensureRecordVisit_(spreadsheet, payload) {
     now,
     false
   ];
-  appendSheetRow_(spreadsheet, 'Visits', row);
-  return { created: true, record: null };
+  var newVisitRowNumber = appendSheetRow_(spreadsheet, 'Visits', row);
+  return {
+    created: true,
+    record: null,
+    rowNumber: newVisitRowNumber
+  };
 }
 
 function validateRecordTagIds_(spreadsheet, payload) {
@@ -1760,6 +1829,83 @@ function mergeStringArrays_(currentValues, additionalValues) {
   return result;
 }
 
+function findSheetRecordByCachedRow_(
+  spreadsheet,
+  sheetName,
+  idField,
+  id,
+  rowNumber
+) {
+  var cachedRowNumber = normalizeCachedRowNumber_(rowNumber);
+  if (cachedRowNumber === null) {
+    return null;
+  }
+
+  var definition = findSheetDefinition_(sheetName);
+  var fieldIndex = definition.headers.indexOf(idField);
+  var sheet = spreadsheet.getSheetByName(sheetName);
+  if (sheet === null || fieldIndex < 0) {
+    throw createApiError_(
+      'INTERNAL_ERROR',
+      sheetName + 'シートの定義が正しくありません。'
+    );
+  }
+
+  var values;
+  try {
+    values = sheet
+      .getRange(cachedRowNumber, 1, 1, definition.headers.length)
+      .getValues()[0];
+  } catch (ignore) {
+    return null;
+  }
+
+  if (
+    String(values[fieldIndex]).trim() !== String(id).trim()
+  ) {
+    return null;
+  }
+
+  var object = {};
+  definition.headers.forEach(function(header, columnIndex) {
+    object[header] = values[columnIndex];
+  });
+  return {
+    rowNumber: cachedRowNumber,
+    values: values,
+    object: object
+  };
+}
+
+function requireActiveSheetRecordWithCachedRow_(
+  spreadsheet,
+  sheetName,
+  idField,
+  id,
+  rowNumber
+) {
+  var cachedRecord = findSheetRecordByCachedRow_(
+    spreadsheet,
+    sheetName,
+    idField,
+    id,
+    rowNumber
+  );
+  if (
+    cachedRecord !== null &&
+    !sheetBoolean_(cachedRecord.object.isDeleted)
+  ) {
+    return cachedRecord;
+  }
+
+  return requireActiveSheetRecord_(
+    spreadsheet,
+    sheetName,
+    idField,
+    id
+  );
+}
+
 function requireActiveSheetRecord_(spreadsheet, sheetName, idField, id) {
   var record = findSheetRecordById_(
     spreadsheet,
@@ -1876,9 +2022,11 @@ function appendSheetRow_(spreadsheet, sheetName, row) {
       sheetName + 'シートがありません。'
     );
   }
+  var rowNumber = sheet.getLastRow() + 1;
   sheet
-    .getRange(sheet.getLastRow() + 1, 1, 1, row.length)
+    .getRange(rowNumber, 1, 1, row.length)
     .setValues([row]);
+  return rowNumber;
 }
 
 function updateSheetRecord_(spreadsheet, sheetName, rowNumber, values) {
@@ -2545,4 +2693,41 @@ function testRecordPhaseDiagnosticsPatchLoaded() {
       'RECORD_FINALIZE_PERFORMANCE'
     ]
   }));
+}
+
+/**
+ * 段階5-4A.8の行番号キャッシュをSpreadsheetへ触れずに確認する。
+ */
+function testRecordRowCachePatchLoaded() {
+  var suffix = String(Date.now());
+  var buildingId = 'row-cache-building-' + suffix;
+  var visitId = 'row-cache-visit-' + suffix;
+  var cacheKey = recordUploadContextCacheKey_(buildingId, visitId);
+  try {
+    cacheRecordUploadContext_(
+      buildingId,
+      visitId,
+      'row-cache-folder',
+      123,
+      456
+    );
+    var cached = getCachedRecordUploadContext_(buildingId, visitId);
+    if (
+      cached === null ||
+      cached.folderId !== 'row-cache-folder' ||
+      cached.buildingRowNumber !== 123 ||
+      cached.visitRowNumber !== 456
+    ) {
+      throw new Error('行番号キャッシュを復元できませんでした。');
+    }
+    console.log(JSON.stringify({
+      ok: true,
+      stage: '5-4A.8',
+      mode: 'row_cache_round_trip',
+      buildingRowNumber: cached.buildingRowNumber,
+      visitRowNumber: cached.visitRowNumber
+    }));
+  } finally {
+    CacheService.getScriptCache().remove(cacheKey);
+  }
 }
