@@ -1,7 +1,6 @@
 var SPREADSHEET_ID_PROPERTY = 'SPREADSHEET_ID';
 var DATA_SPREADSHEET_NAME = 'building-record-app-data';
 var DATA_SCHEMA_VERSION = '1.0';
-
 var DATA_SHEET_DEFINITIONS = [
   {
     name: 'Buildings',
@@ -90,7 +89,6 @@ var DATA_SHEET_DEFINITIONS = [
     ]
   }
 ];
-
 /**
  * データ保存用Spreadsheetと必要なシートを作成する。
  * Apps Scriptエディタから最初に一度実行する。
@@ -105,7 +103,6 @@ function setupDataSpreadsheet() {
       properties.getProperty(SPREADSHEET_ID_PROPERTY)
     );
     var spreadsheet;
-
     if (existingId !== null) {
       spreadsheet = openDataSpreadsheetById_(existingId);
       ensureDataSchema_(spreadsheet);
@@ -118,7 +115,6 @@ function setupDataSpreadsheet() {
     spreadsheet = SpreadsheetApp.create(DATA_SPREADSHEET_NAME);
     spreadsheet.setSpreadsheetTimeZone('Asia/Tokyo');
     initializeNewSpreadsheet_(spreadsheet);
-
     properties.setProperty(
       SPREADSHEET_ID_PROPERTY,
       spreadsheet.getId()
@@ -131,9 +127,10 @@ function setupDataSpreadsheet() {
     lock.releaseLock();
   }
 }
-
 /**
  * Script Propertiesに保存されたSpreadsheetを開く。
+ * 通常APIでは重いスキーマ検証・ヘッダー整形を毎回行わない。
+ * スキーマ確認はsetupDataSpreadsheet()を手動実行して行う。
  *
  * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
@@ -151,9 +148,23 @@ function getDataSpreadsheet_() {
     );
   }
 
-  var spreadsheet = openDataSpreadsheetById_(spreadsheetId);
-  ensureDataSchema_(spreadsheet);
-  return spreadsheet;
+  return openDataSpreadsheetById_(spreadsheetId);
+}
+
+/**
+ * 通常APIと同じ高速経路でSpreadsheetを開けることを確認する。
+ * Apps Scriptエディタから手動実行する診断用。
+ */
+function testDataSpreadsheetFastPath() {
+  var startedAt = Date.now();
+  var spreadsheet = getDataSpreadsheet_();
+  console.log(JSON.stringify({
+    ok: true,
+    mode: 'open_only',
+    spreadsheetId: spreadsheet.getId(),
+    schemaVersion: DATA_SCHEMA_VERSION,
+    elapsedMs: Date.now() - startedAt
+  }));
 }
 
 /**
@@ -172,7 +183,6 @@ function openDataSpreadsheetById_(spreadsheetId) {
     );
   }
 }
-
 /**
  * 新規Spreadsheetへ全シートを作成する。
  *
@@ -183,7 +193,6 @@ function initializeNewSpreadsheet_(spreadsheet) {
   var firstSheet = spreadsheet.getSheets()[0];
   firstSheet.setName(firstDefinition.name);
   writeHeaderRow_(firstSheet, firstDefinition.headers);
-
   for (var i = 1; i < DATA_SHEET_DEFINITIONS.length; i += 1) {
     var definition = DATA_SHEET_DEFINITIONS[i];
     var sheet = spreadsheet.insertSheet(definition.name);
@@ -199,7 +208,6 @@ function initializeNewSpreadsheet_(spreadsheet) {
 function ensureDataSchema_(spreadsheet) {
   DATA_SHEET_DEFINITIONS.forEach(function(definition) {
     var sheet = spreadsheet.getSheetByName(definition.name);
-
     if (sheet === null) {
       sheet = spreadsheet.insertSheet(definition.name);
       writeHeaderRow_(sheet, definition.headers);
@@ -221,7 +229,6 @@ function ensureHeaderRow_(sheet, expectedHeaders) {
     writeHeaderRow_(sheet, expectedHeaders);
     return;
   }
-
   var actualHeaders = sheet
     .getRange(1, 1, 1, expectedHeaders.length)
     .getValues()[0]
@@ -240,7 +247,6 @@ function ensureHeaderRow_(sheet, expectedHeaders) {
 
   formatHeaderRow_(sheet, expectedHeaders.length);
 }
-
 /**
  * ヘッダー行を書き込む。
  *
@@ -251,7 +257,6 @@ function writeHeaderRow_(sheet, headers) {
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   formatHeaderRow_(sheet, headers.length);
 }
-
 /**
  * ヘッダー行の表示を整える。
  *
@@ -265,7 +270,6 @@ function formatHeaderRow_(sheet, columnCount) {
     .setFontWeight('bold')
     .setBackground('#DCEFF2');
 }
-
 /**
  * シートの各行を、1行目のヘッダーをキーとするObjectへ変換する。
  *
@@ -283,7 +287,6 @@ function readSheetObjects_(spreadsheet, sheetName) {
       sheetName + 'シートがありません。'
     );
   }
-
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
     return [];
@@ -307,7 +310,6 @@ function readSheetObjects_(spreadsheet, sheetName) {
       return result;
     });
 }
-
 /**
  * シート定義を取得する。
  *
@@ -326,7 +328,6 @@ function findSheetDefinition_(sheetName) {
     sheetName + 'のシート定義がありません。'
   );
 }
-
 /**
  * 空セルか判定する。
  *
@@ -351,7 +352,6 @@ function optionalSheetString_(value) {
   var result = String(value).trim();
   return result === '' ? null : result;
 }
-
 /**
  * セルを任意数値へ変換する。
  *
@@ -384,7 +384,6 @@ function sheetBoolean_(value) {
   if (value === true || value === 1) {
     return true;
   }
-
   if (typeof value === 'string') {
     var normalized = value.trim().toLowerCase();
     return normalized === 'true' || normalized === '1';
@@ -404,7 +403,6 @@ function sheetStringArray_(value, fieldName) {
   if (isBlankSheetCell_(value)) {
     return [];
   }
-
   if (Array.isArray(value)) {
     return value
       .map(function(item) { return String(item).trim(); })
@@ -427,7 +425,6 @@ function sheetStringArray_(value, fieldName) {
       fieldName + 'がJSON配列ではありません。'
     );
   }
-
   return parsed
     .map(function(item) { return String(item).trim(); })
     .filter(function(item) { return item !== ''; });
@@ -451,6 +448,5 @@ function sheetDateTime_(value) {
       "yyyy-MM-dd'T'HH:mm:ss"
     ) + '+09:00';
   }
-
   return optionalSheetString_(value);
 }
