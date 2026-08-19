@@ -210,6 +210,124 @@ function handleUploadPhoto(requestId, payload, authContext) {
   );
 }
 
+/**
+ * 送信可能になった写真を最大2枚まとめて1回のHTTP通信で保存する。
+ * 各写真は従来どおり個別のrequestId / photoIdで処理し、
+ * 一方だけ失敗した場合も写真単位の結果を返す。
+ *
+ * @param {string|null} requestId バッチ通信自体のrequestId
+ * @param {Object} payload
+ * @param {{subject: string, email: string}} authContext
+ * @return {GoogleAppsScript.Content.TextOutput}
+ */
+function handleUploadPhotosBatch(requestId, payload, authContext) {
+  requireAuthenticatedContext_(authContext);
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      '写真一括送信のpayloadがJSONオブジェクトではありません。'
+    );
+  }
+
+  var photos = payload.photos;
+  if (!Array.isArray(photos) || photos.length < 1 || photos.length > 2) {
+    throw createApiError_(
+      'VALIDATION_ERROR',
+      '写真一括送信は1回につき1枚または2枚です。'
+    );
+  }
+
+  var results = [];
+  photos.forEach(function(item) {
+    var itemRequestId = null;
+    var photoId = null;
+    try {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        throw createApiError_(
+          'VALIDATION_ERROR',
+          '写真一括送信の要素がJSONオブジェクトではありません。'
+        );
+      }
+
+      itemRequestId = getOptionalString(item.requestId);
+      if (!itemRequestId) {
+        throw createApiError_(
+          'VALIDATION_ERROR',
+          '写真一括送信の各写真にrequestIdが必要です。'
+        );
+      }
+
+      if (
+        !item.payload ||
+        typeof item.payload !== 'object' ||
+        Array.isArray(item.payload)
+      ) {
+        throw createApiError_(
+          'VALIDATION_ERROR',
+          '写真一括送信の各写真にpayloadが必要です。'
+        );
+      }
+
+      photoId = getOptionalString(item.payload.photoId);
+      var response = handleUploadPhoto(
+        itemRequestId,
+        item.payload,
+        authContext
+      );
+      var parsed = JSON.parse(response.getContent());
+
+      if (!parsed || parsed.ok !== true || !parsed.data) {
+        results.push({
+          requestId: itemRequestId,
+          photoId: photoId,
+          ok: false,
+          errorCode: parsed && parsed.errorCode
+            ? parsed.errorCode
+            : 'INTERNAL_ERROR',
+          message: parsed && parsed.message
+            ? parsed.message
+            : '写真を保存できませんでした。'
+        });
+        return;
+      }
+
+      results.push({
+        requestId: itemRequestId,
+        photoId: photoId || getOptionalString(parsed.data.photoId),
+        ok: true,
+        data: parsed.data,
+        errorCode: null,
+        message: null
+      });
+    } catch (error) {
+      results.push({
+        requestId: itemRequestId,
+        photoId: photoId,
+        ok: false,
+        errorCode: error && error.apiErrorCode
+          ? error.apiErrorCode
+          : 'INTERNAL_ERROR',
+        message: error && typeof error.message === 'string'
+          ? error.message
+          : '写真を保存できませんでした。'
+      });
+    }
+  });
+
+  return createApiResponse(
+    true,
+    requestId,
+    {
+      results: results,
+      batchSize: photos.length,
+      stage: '5-4A.9'
+    },
+    null,
+    null
+  );
+}
+
 function createRecordUploadTimings_(authContext) {
   return {
     authenticationMs: Number(authContext.verificationMs) || 0,

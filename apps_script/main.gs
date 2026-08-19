@@ -112,6 +112,12 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'uploadPhotosBatch':
+        return handleUploadPhotosBatch(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'uploadPhotoThumbnail':
         return handleUploadPhotoThumbnail(
           requestId,
@@ -161,7 +167,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '5-4A.4',
+      stage: '5-4A.9',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'
@@ -189,7 +195,6 @@ function parseJsonRequest(e) {
       'POST本文がありません。'
     );
   }
-
   var parsed;
   try {
     parsed = JSON.parse(e.postData.contents);
@@ -261,7 +266,7 @@ function testUnauthenticatedHealthCheck() {
         action: 'healthCheck',
         requestId: 'apps-script-editor-test',
         idToken: null,
-        clientVersion: 'v0.19.4',
+        clientVersion: 'v0.19.9',
         payload: {}
       })
     }
