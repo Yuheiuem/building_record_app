@@ -71,6 +71,7 @@ class RecordDraftController extends ChangeNotifier {
   bool _isPicking = false;
   String? _errorMessage;
   String? _noticeMessage;
+  String? _photoPreparationStatusMessage;
 
   bool _isLoadingBootstrap = false;
   bool _hasLoadedBootstrap = false;
@@ -94,6 +95,8 @@ class RecordDraftController extends ChangeNotifier {
   String? _submissionErrorMessage;
   String? _submissionErrorDetail;
   String? _submissionNoticeMessage;
+  String? _submissionOperationMessage;
+  DateTime? _submissionStartedAt;
   BeginRecordResult? _beginRecordResult;
   FinalizeRecordResult? _finalizeRecordResult;
   String? _beginRequestId;
@@ -125,6 +128,7 @@ class RecordDraftController extends ChangeNotifier {
   );
   String? get errorMessage => _errorMessage;
   String? get noticeMessage => _noticeMessage;
+  String? get photoPreparationStatusMessage => _photoPreparationStatusMessage;
 
   bool get isLoadingBootstrap => _isLoadingBootstrap;
   bool get hasLoadedBootstrap => _hasLoadedBootstrap;
@@ -153,6 +157,8 @@ class RecordDraftController extends ChangeNotifier {
   String? get submissionErrorMessage => _submissionErrorMessage;
   String? get submissionErrorDetail => _submissionErrorDetail;
   String? get submissionNoticeMessage => _submissionNoticeMessage;
+  String? get submissionOperationMessage => _submissionOperationMessage;
+  DateTime? get submissionStartedAt => _submissionStartedAt;
   String? get currentUploadingPhotoId => _currentUploadingPhotoId;
   String? get savedBuildingId => _finalizeRecordResult?.buildingId;
   String? get savedVisitId => _finalizeRecordResult?.visitId;
@@ -182,6 +188,14 @@ class RecordDraftController extends ChangeNotifier {
   int get failedPhotoCount =>
       _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
         return status == RecordPhotoUploadStatus.failed;
+      }).length;
+  int get uploadingPhotoCount =>
+      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
+        return status == RecordPhotoUploadStatus.uploading;
+      }).length;
+  int get pendingPhotoCount =>
+      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
+        return status == RecordPhotoUploadStatus.pending;
       }).length;
   double get submissionProgress {
     if (_photos.isEmpty) {
@@ -384,11 +398,24 @@ class RecordDraftController extends ChangeNotifier {
     _isPicking = true;
     _errorMessage = null;
     _noticeMessage = null;
+    _photoPreparationStatusMessage = '写真を選択・変換しています。';
     notifyListeners();
 
     try {
-      final List<RecordDraftPhoto> selectedPhotos = await _imagePickerService
-          .pickImages();
+      final RecordImagePickerService imagePickerService = _imagePickerService;
+      final List<RecordDraftPhoto> selectedPhotos;
+      if (imagePickerService is RecordImagePickerProgressService) {
+        final RecordImagePickerProgressService progressService =
+            imagePickerService as RecordImagePickerProgressService;
+        selectedPhotos = await progressService.pickImagesWithProgress(
+          onProgress: (RecordImagePickProgress progress) {
+            _photoPreparationStatusMessage = progress.message;
+            notifyListeners();
+          },
+        );
+      } else {
+        selectedPhotos = await imagePickerService.pickImages();
+      }
       if (selectedPhotos.isEmpty) {
         return;
       }
@@ -434,6 +461,7 @@ class RecordDraftController extends ChangeNotifier {
       _errorMessage = '写真を選択できませんでした。もう一度お試しください。';
     } finally {
       _isPicking = false;
+      _photoPreparationStatusMessage = null;
       notifyListeners();
     }
   }
@@ -671,6 +699,7 @@ class RecordDraftController extends ChangeNotifier {
       _submissionErrorMessage = validationMessage;
       _submissionErrorDetail = null;
       _submissionNoticeMessage = null;
+      _submissionOperationMessage = null;
       notifyListeners();
       return;
     }
@@ -703,6 +732,8 @@ class RecordDraftController extends ChangeNotifier {
     _submissionErrorMessage = null;
     _submissionErrorDetail = null;
     _submissionNoticeMessage = null;
+    _submissionOperationMessage = '保存処理を開始しています。';
+    _submissionStartedAt = DateTime.now();
     _lastSubmissionDuration = null;
     _lastPreparationDuration = null;
     _lastPhotoUploadDuration = null;
@@ -722,6 +753,8 @@ class RecordDraftController extends ChangeNotifier {
       _currentUploadingPhotoId = null;
       if (failedDetails.isNotEmpty) {
         _submissionPhase = RecordSubmissionPhase.failed;
+        _submissionOperationMessage =
+            '送信に失敗しました。送信済みの写真は保持しています。';
         if (_requiresReauthentication) {
           _submissionErrorMessage = 'ログインの有効期限が切れました。';
           _submissionErrorDetail = '入力内容と送信済み写真は保持されています。認証更新後にもう一度保存してください。';
@@ -735,6 +768,7 @@ class RecordDraftController extends ChangeNotifier {
 
       if (_finalizeRecordResult == null) {
         _submissionPhase = RecordSubmissionPhase.failed;
+        _submissionOperationMessage = '記録を確定できませんでした。';
         _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
         _submissionErrorDetail = '記録を確定できませんでした。';
         notifyListeners();
@@ -742,6 +776,7 @@ class RecordDraftController extends ChangeNotifier {
       }
 
       _submissionPhase = RecordSubmissionPhase.succeeded;
+      _submissionOperationMessage = '保存が完了しました。';
       _submissionNoticeMessage = '建物・訪問・写真${_photos.length}枚を保存しました。';
       _submissionErrorMessage = null;
       _submissionErrorDetail = null;
@@ -749,6 +784,8 @@ class RecordDraftController extends ChangeNotifier {
       notifyListeners();
     } on RecordSubmissionApiException catch (error) {
       _submissionPhase = RecordSubmissionPhase.failed;
+      _submissionOperationMessage =
+          '送信に失敗しました。送信済みの内容は保持しています。';
       _currentUploadingPhotoId = null;
       if (_isAuthenticationRequired(error.errorCode)) {
         _markAuthenticationRequired(idToken);
@@ -761,6 +798,8 @@ class RecordDraftController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       _submissionPhase = RecordSubmissionPhase.failed;
+      _submissionOperationMessage =
+          '保存中に予期しないエラーが発生しました。';
       _currentUploadingPhotoId = null;
       _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
       _submissionErrorDetail = '記録の保存中に予期しないエラーが発生しました。';
@@ -787,6 +826,8 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _submissionPhase = RecordSubmissionPhase.finalizing;
+    _submissionOperationMessage =
+        '建物・訪問・写真を送信用データへ変換して保存しています。';
     _currentUploadingPhotoId = photo.photoId;
     _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploading;
     notifyListeners();
@@ -859,6 +900,7 @@ class RecordDraftController extends ChangeNotifier {
   ) async {
     if (_beginRecordResult == null) {
       _submissionPhase = RecordSubmissionPhase.starting;
+      _submissionOperationMessage = '建物・訪問データを送信しています。';
       notifyListeners();
 
       final Stopwatch preparationStopwatch = Stopwatch()..start();
@@ -921,6 +963,11 @@ class RecordDraftController extends ChangeNotifier {
           );
 
           _submissionPhase = RecordSubmissionPhase.uploading;
+          final int completedBeforeWave = uploadedPhotoCount;
+          _submissionOperationMessage =
+              '写真を送信用データへ変換して送信しています。'
+              ' 完了 $completedBeforeWave/${_photos.length}枚、'
+              '今回 ${wave.length}枚を処理中です。';
           _currentUploadingPhotoId = wave.first.photoId;
           for (final RecordDraftPhoto photo in wave) {
             _photoUploadStatuses[photo.photoId] =
@@ -959,6 +1006,8 @@ class RecordDraftController extends ChangeNotifier {
           notifyListeners();
 
           if (failedDetails.isNotEmpty) {
+            _submissionOperationMessage =
+                '一部の写真送信に失敗しました。失敗分だけ再送できます。';
             return failedDetails;
           }
         }
@@ -970,6 +1019,8 @@ class RecordDraftController extends ChangeNotifier {
 
     if (_finalizeRecordResult == null) {
       _submissionPhase = RecordSubmissionPhase.finalizing;
+      _submissionOperationMessage =
+          '保存した写真を確認して記録を確定しています。';
       _currentUploadingPhotoId = null;
       notifyListeners();
 
@@ -1091,10 +1142,13 @@ class RecordDraftController extends ChangeNotifier {
     _authenticationFailureToken = null;
     _errorMessage = null;
     _noticeMessage = null;
+    _photoPreparationStatusMessage = null;
     _submissionPhase = RecordSubmissionPhase.idle;
     _submissionErrorMessage = null;
     _submissionErrorDetail = null;
     _submissionNoticeMessage = null;
+    _submissionOperationMessage = null;
+    _submissionStartedAt = null;
     _beginRecordResult = null;
     _finalizeRecordResult = null;
     _beginRequestId = null;

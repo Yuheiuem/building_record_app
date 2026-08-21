@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -244,6 +245,8 @@ class _RecordPageState extends State<RecordPage> {
                               _DraftHeader(
                                 isPicking: _controller.isPicking,
                                 hasPhotos: _controller.hasPhotos,
+                                statusMessage:
+                                    _controller.photoPreparationStatusMessage,
                                 onAddPhotos: _controller.addPhotos,
                                 onClearPhotos: _confirmClearPhotos,
                               ),
@@ -368,9 +371,16 @@ class _RecordSaveSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            const Text('建物と訪問を準備し、複数写真は最大2枚ずつ並行して非公開Driveへ保存します。'),
+            const Text('建物と訪問を準備し、写真をまとめて非公開Driveへ保存します。'),
             const SizedBox(height: 16),
             _SubmissionStatusPanel(controller: controller),
+            if (controller.isSubmitting &&
+                controller.submissionStartedAt != null) ...<Widget>[
+              const SizedBox(height: 10),
+              _LiveSubmissionElapsed(
+                startedAt: controller.submissionStartedAt!,
+              ),
+            ],
             if (showPhotoProgress) ...<Widget>[
               const SizedBox(height: 16),
               LinearProgressIndicator(
@@ -387,16 +397,30 @@ class _RecordSaveSection extends StatelessWidget {
                 '写真 ${controller.uploadedPhotoCount}/${controller.photoCount}枚を送信済み',
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 10),
+              _PhotoTransferSummary(controller: controller),
               const SizedBox(height: 12),
-              ...controller.photos.map((RecordDraftPhoto photo) {
-                return _PhotoUploadProgressRow(
-                  photo: photo,
-                  status: controller.photoUploadStatus(photo.photoId),
-                  performance: controller
-                      .photoUploadResult(photo.photoId)
-                      ?.performance,
-                );
-              }),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+                ),
+                child: ListView.builder(
+                  key: const Key('record-photo-upload-progress-scroll'),
+                  primary: false,
+                  shrinkWrap: true,
+                  itemCount: controller.photos.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final RecordDraftPhoto photo = controller.photos[index];
+                    return _PhotoUploadProgressRow(
+                      photo: photo,
+                      status: controller.photoUploadStatus(photo.photoId),
+                      performance: controller
+                          .photoUploadResult(photo.photoId)
+                          ?.performance,
+                    );
+                  },
+                ),
+              ),
             ],
             if (controller.lastSubmissionDuration != null) ...<Widget>[
               const SizedBox(height: 12),
@@ -517,7 +541,7 @@ class _SubmissionStatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ({IconData icon, String label}) details =
+    final ({IconData icon, String label}) phaseDetails =
         switch (controller.submissionPhase) {
           RecordSubmissionPhase.idle => (
             icon: Icons.edit_note_outlined,
@@ -529,7 +553,7 @@ class _SubmissionStatusPanel extends StatelessWidget {
           ),
           RecordSubmissionPhase.uploading => (
             icon: Icons.photo_library_outlined,
-            label: '写真を最大2枚ずつ送信しています。',
+            label: '写真をまとめて送信しています。',
           ),
           RecordSubmissionPhase.finalizing => (
             icon: Icons.fact_check_outlined,
@@ -544,8 +568,13 @@ class _SubmissionStatusPanel extends StatelessWidget {
             label: '記録の保存が完了しました。',
           ),
         };
+    final ({IconData icon, String label}) details = (
+      icon: phaseDetails.icon,
+      label: controller.submissionOperationMessage ?? phaseDetails.label,
+    );
 
     return Container(
+      key: const Key('record-operation-status'),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -557,6 +586,105 @@ class _SubmissionStatusPanel extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: Text(details.label)),
         ],
+      ),
+    );
+  }
+}
+
+class _PhotoTransferSummary extends StatelessWidget {
+  const _PhotoTransferSummary({required this.controller});
+
+  final RecordDraftController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> items = <Widget>[
+      _TransferCount(label: '完了', count: controller.uploadedPhotoCount),
+      _TransferCount(label: '送信中', count: controller.uploadingPhotoCount),
+      _TransferCount(label: '待機', count: controller.pendingPhotoCount),
+      if (controller.failedPhotoCount > 0)
+        _TransferCount(label: '再送待ち', count: controller.failedPhotoCount),
+    ];
+
+    return Wrap(
+      key: const Key('record-transfer-summary'),
+      alignment: WrapAlignment.center,
+      spacing: 12,
+      runSpacing: 8,
+      children: items,
+    );
+  }
+}
+
+class _TransferCount extends StatelessWidget {
+  const _TransferCount({required this.label, required this.count});
+
+  final String label;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text('$label $count枚'),
+    );
+  }
+}
+
+class _LiveSubmissionElapsed extends StatefulWidget {
+  const _LiveSubmissionElapsed({required this.startedAt});
+
+  final DateTime startedAt;
+
+  @override
+  State<_LiveSubmissionElapsed> createState() =>
+      _LiveSubmissionElapsedState();
+}
+
+class _LiveSubmissionElapsedState extends State<_LiveSubmissionElapsed> {
+  Timer? _timer;
+  late Duration _elapsed;
+
+  @override
+  void initState() {
+    super.initState();
+    _elapsed = DateTime.now().difference(widget.startedAt);
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _elapsed = DateTime.now().difference(widget.startedAt);
+      });
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveSubmissionElapsed oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.startedAt != widget.startedAt) {
+      _elapsed = DateTime.now().difference(widget.startedAt);
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      key: const Key('record-live-submission-elapsed'),
+      '経過 ${_formatClockDuration(_elapsed)}',
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        fontWeight: FontWeight.w600,
       ),
     );
   }
@@ -932,6 +1060,19 @@ String _formatElapsed(Duration duration) {
   return _formatMilliseconds(duration.inMilliseconds);
 }
 
+String _formatClockDuration(Duration duration) {
+  final int totalSeconds = math.max(0, duration.inSeconds);
+  final int hours = totalSeconds ~/ 3600;
+  final int minutes = (totalSeconds % 3600) ~/ 60;
+  final int seconds = totalSeconds % 60;
+  final String secondsText = seconds.toString().padLeft(2, '0');
+  if (hours > 0) {
+    final String minutesText = minutes.toString().padLeft(2, '0');
+    return '$hours:$minutesText:$secondsText';
+  }
+  return '$minutes:$secondsText';
+}
+
 String _formatMilliseconds(int milliseconds) {
   if (milliseconds < 1000) {
     return '$milliseconds ms';
@@ -951,12 +1092,14 @@ class _DraftHeader extends StatelessWidget {
   const _DraftHeader({
     required this.isPicking,
     required this.hasPhotos,
+    required this.statusMessage,
     required this.onAddPhotos,
     required this.onClearPhotos,
   });
 
   final bool isPicking;
   final bool hasPhotos;
+  final String? statusMessage;
   final VoidCallback onAddPhotos;
   final VoidCallback onClearPhotos;
 
@@ -1040,6 +1183,13 @@ class _DraftHeader extends StatelessWidget {
                   ),
               ],
             ),
+            if (statusMessage != null) ...<Widget>[
+              const SizedBox(height: 12),
+              _ActivityStatusPanel(
+                key: const Key('record-photo-preparation-status'),
+                message: statusMessage!,
+              ),
+            ],
           ],
         ),
       ),
@@ -1610,6 +1760,9 @@ class _ExistingBuildingDraftForm extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Building> filteredBuildings = controller.filteredBuildings;
+    final List<Building> visibleBuildings = filteredBuildings
+        .take(20)
+        .toList(growable: false);
     final Building? selectedBuilding = controller.selectedExistingBuilding;
 
     return Column(
@@ -1633,39 +1786,54 @@ class _ExistingBuildingDraftForm extends StatelessWidget {
           const _EmptyBuildingPanel(message: '検索条件に一致する建物がありません。')
         else
           Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              for (final Building building in filteredBuildings.take(20))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Card(
-                    margin: EdgeInsets.zero,
-                    clipBehavior: Clip.antiAlias,
-                    child: ListTile(
-                      key: Key(
-                        'existing-building-option-${building.buildingId}',
-                      ),
-                      selected:
-                          selectedBuilding?.buildingId == building.buildingId,
-                      onTap: () {
-                        controller.selectExistingBuilding(building.buildingId);
-                      },
-                      leading: const Icon(Icons.location_city_outlined),
-                      title: Text(building.buildingName),
-                      subtitle: building.address == null
-                          ? null
-                          : Text(building.address!),
-                      trailing:
-                          selectedBuilding?.buildingId == building.buildingId
-                          ? Icon(
-                              Icons.check_circle,
-                              color: Theme.of(context).colorScheme.primary,
-                            )
-                          : const Icon(Icons.chevron_right),
-                    ),
-                  ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.7,
                 ),
-              if (filteredBuildings.length > 20)
+                child: ListView.separated(
+                  key: const Key('existing-building-results-scroll'),
+                  primary: false,
+                  shrinkWrap: true,
+                  itemCount: visibleBuildings.length,
+                  separatorBuilder: (BuildContext context, int index) =>
+                      const SizedBox(height: 8),
+                  itemBuilder: (BuildContext context, int index) {
+                    final Building building = visibleBuildings[index];
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      clipBehavior: Clip.antiAlias,
+                      child: ListTile(
+                        key: Key(
+                          'existing-building-option-${building.buildingId}',
+                        ),
+                        selected:
+                            selectedBuilding?.buildingId == building.buildingId,
+                        onTap: () {
+                          controller.selectExistingBuilding(building.buildingId);
+                        },
+                        leading: const Icon(Icons.location_city_outlined),
+                        title: Text(building.buildingName),
+                        subtitle: building.address == null
+                            ? null
+                            : Text(building.address!),
+                        trailing:
+                            selectedBuilding?.buildingId == building.buildingId
+                            ? Icon(
+                                Icons.check_circle,
+                                color: Theme.of(context).colorScheme.primary,
+                              )
+                            : const Icon(Icons.chevron_right),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (filteredBuildings.length > 20) ...<Widget>[
+                const SizedBox(height: 8),
                 const Text('先頭20件を表示しています。検索文字を追加してください。'),
+              ],
             ],
           ),
         if (selectedBuilding != null) ...<Widget>[
@@ -1953,7 +2121,7 @@ class _VisitDraftSection extends StatelessWidget {
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '複数写真は最大2枚ずつ送信します。途中で失敗した場合は、入力内容と送信済み写真を保持して失敗分だけ再送します。',
+                      '複数写真はまとめて送信します。途中で失敗した場合は、入力内容と送信済み写真を保持して失敗分だけ再送します。',
                     ),
                   ),
                 ],
@@ -2196,6 +2364,42 @@ class _InlineLocationMessage extends StatelessWidget {
   }
 }
 
+class _ActivityStatusPanel extends StatelessWidget {
+  const _ActivityStatusPanel({required this.message, super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: <Widget>[
+          SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: colors.onSecondaryContainer,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(color: colors.onSecondaryContainer),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MessagePanel extends StatelessWidget {
   const _MessagePanel({
     required this.icon,
@@ -2323,24 +2527,43 @@ class _PhotoDraftSection extends StatelessWidget {
               columnCount = 2;
             }
 
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: photos.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columnCount,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: 0.78,
+            const double spacing = 12;
+            const double childAspectRatio = 0.78;
+            final int rowCount = (photos.length / columnCount).ceil();
+            final double cardWidth =
+                (constraints.maxWidth - spacing * (columnCount - 1)) /
+                columnCount;
+            final double cardHeight = cardWidth / childAspectRatio;
+            final double contentHeight =
+                rowCount * cardHeight + math.max(0, rowCount - 1) * spacing;
+            final double maxGridHeight =
+                MediaQuery.sizeOf(context).height * 0.7;
+            final double gridHeight = math.min(contentHeight, maxGridHeight);
+
+            return SizedBox(
+              key: const Key('record-photo-draft-scroll'),
+              height: gridHeight,
+              child: GridView.builder(
+                primary: false,
+                physics: contentHeight > maxGridHeight
+                    ? const ClampingScrollPhysics()
+                    : const NeverScrollableScrollPhysics(),
+                itemCount: photos.length,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: columnCount,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  childAspectRatio: childAspectRatio,
+                ),
+                itemBuilder: (BuildContext context, int index) {
+                  final RecordDraftPhoto photo = photos[index];
+                  return _DraftPhotoCard(
+                    key: ValueKey<String>('draft-photo-${photo.photoId}'),
+                    photo: photo,
+                    onRemove: () => onRemovePhoto(photo.photoId),
+                  );
+                },
               ),
-              itemBuilder: (BuildContext context, int index) {
-                final RecordDraftPhoto photo = photos[index];
-                return _DraftPhotoCard(
-                  key: ValueKey<String>('draft-photo-${photo.photoId}'),
-                  photo: photo,
-                  onRemove: () => onRemovePhoto(photo.photoId),
-                );
-              },
             );
           },
         ),
