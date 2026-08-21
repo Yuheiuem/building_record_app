@@ -15,6 +15,8 @@ var RECORD_LOCATION_SOURCES = [
 var RECORD_UPLOAD_CACHE_SECONDS = 21600;
 var RECORD_UPLOAD_CONTEXT_CACHE_PREFIX = 'record-upload-context:';
 var RECORD_UPLOAD_RESULT_CACHE_PREFIX = 'record-upload-result:';
+var RECORD_FINALIZE_PHOTO_RETRY_COUNT = 2;
+var RECORD_FINALIZE_PHOTO_RETRY_DELAY_MS = 150;
 
 /**
  * 建物・訪問のdraftを作成する。
@@ -117,7 +119,7 @@ function handleBeginRecord(requestId, payload, authContext) {
       buildingCreated: buildingResult.created,
       visitCreated: visitResult.created,
       reused: false,
-      stage: '5-4A.8',
+      stage: '5-4A.11',
       performance: performance
     };
 
@@ -321,7 +323,7 @@ function handleUploadPhotosBatch(requestId, payload, authContext) {
     {
       results: results,
       batchSize: photos.length,
-      stage: '5-4A.9'
+      stage: '5-4A.11'
     },
     null,
     null
@@ -706,15 +708,19 @@ function handleUploadPhotoParallelStep_(
   );
   timings.thumbnailDriveSaveMs += Date.now() - thumbnailStartedAt;
 
-  var spreadsheetOpenStartedAt = Date.now();
-  var spreadsheet = getDataSpreadsheet_();
-  timings.spreadsheetOpenMs += Date.now() - spreadsheetOpenStartedAt;
   var lock = LockService.getScriptLock();
   var lockStartedAt = Date.now();
   lock.waitLock(30000);
   timings.lockWaitMs = Date.now() - lockStartedAt;
 
   try {
+    // Parallel batch requests may have opened the spreadsheet before another
+    // request committed its row. Open only after acquiring the script lock so
+    // getLastRow()/TextFinder see the latest committed Photos state.
+    var spreadsheetOpenStartedAt = Date.now();
+    var spreadsheet = getDataSpreadsheet_();
+    timings.spreadsheetOpenMs += Date.now() - spreadsheetOpenStartedAt;
+
     var photoLookupStartedAt = Date.now();
     var existingPhoto = findSheetRecordById_(
       spreadsheet,
@@ -778,6 +784,20 @@ function handleUploadPhotoParallelStep_(
       );
       var photoWriteStartedAt = Date.now();
       appendSheetRow_(spreadsheet, 'Photos', photoRow);
+      SpreadsheetApp.flush();
+      var storedPhoto = findSheetRecordById_(
+        spreadsheet,
+        'Photos',
+        'photoId',
+        normalized.photoId
+      );
+      if (storedPhoto === null) {
+        throw createApiError_(
+          'INTERNAL_ERROR',
+          '写真メタデータの保存を確認できませんでした。'
+        );
+      }
+      validateExistingPhotoRecord_(storedPhoto, normalized);
       timings.sheetWriteMs += Date.now() - photoWriteStartedAt;
       result = createRecordPhotoUploadResult_(
         normalized,
@@ -1253,6 +1273,8 @@ function handleFinalizeRecord(requestId, payload, authContext) {
     buildingLookupMs: 0,
     visitLookupMs: 0,
     photosLookupMs: 0,
+    photosLookupRetryCount: 0,
+    photosLookupRetryMs: 0,
     visitUpdateMs: 0,
     buildingUpdateMs: 0,
     requestLogWriteMs: 0,
@@ -1264,16 +1286,19 @@ function handleFinalizeRecord(requestId, payload, authContext) {
   var normalized = normalizeFinalizeRecordPayload_(requestId, payload);
   performance.normalizeMs = Date.now() - normalizeStartedAt;
 
-  var spreadsheetStartedAt = Date.now();
-  var spreadsheet = getDataSpreadsheet_();
-  performance.spreadsheetOpenMs = Date.now() - spreadsheetStartedAt;
-
   var lock = LockService.getScriptLock();
   var lockStartedAt = Date.now();
   lock.waitLock(20000);
   performance.lockWaitMs = Date.now() - lockStartedAt;
 
   try {
+    // Photo uploads flush their Photos row before releasing the same script
+    // lock. Opening the spreadsheet after the lock avoids a stale pre-lock
+    // view when two batch requests finish close together.
+    var spreadsheetStartedAt = Date.now();
+    var spreadsheet = getDataSpreadsheet_();
+    performance.spreadsheetOpenMs = Date.now() - spreadsheetStartedAt;
+
     var requestLookupStartedAt = Date.now();
     var cached = getRequestResult_(
       spreadsheet,
@@ -1336,18 +1361,35 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       );
     }
 
+    var expectedPhotoCount = Number(visitRecord.object.expectedPhotoCount);
     var photosLookupStartedAt = Date.now();
-    var photos = readSheetRecordsByField_(
+    var photos = readActiveRecordPhotosForVisit_(
       spreadsheet,
-      'Photos',
-      'visitId',
       normalized.visitId
-    ).filter(function(record) {
-      return !sheetBoolean_(record.object.isDeleted);
-    });
+    );
     performance.photosLookupMs = Date.now() - photosLookupStartedAt;
 
-    var expectedPhotoCount = Number(visitRecord.object.expectedPhotoCount);
+    for (
+      var retryIndex = 0;
+      photos.length !== expectedPhotoCount
+        && retryIndex < RECORD_FINALIZE_PHOTO_RETRY_COUNT;
+      retryIndex += 1
+    ) {
+      var retryStartedAt = Date.now();
+      SpreadsheetApp.flush();
+      Utilities.sleep(RECORD_FINALIZE_PHOTO_RETRY_DELAY_MS);
+      var retrySpreadsheetStartedAt = Date.now();
+      spreadsheet = getDataSpreadsheet_();
+      performance.spreadsheetOpenMs += Date.now()
+        - retrySpreadsheetStartedAt;
+      photos = readActiveRecordPhotosForVisit_(
+        spreadsheet,
+        normalized.visitId
+      );
+      performance.photosLookupRetryCount += 1;
+      performance.photosLookupRetryMs += Date.now() - retryStartedAt;
+    }
+
     if (photos.length !== expectedPhotoCount) {
       throw createApiError_(
         'CONFLICT',
@@ -1391,7 +1433,7 @@ function handleFinalizeRecord(requestId, payload, authContext) {
       photoCount: photos.length,
       status: 'completed',
       reused: false,
-      stage: '5-4A.8',
+      stage: '5-4A.11',
       performance: performance
     };
 
@@ -1419,6 +1461,7 @@ function handleFinalizeRecord(requestId, payload, authContext) {
         - performance.buildingLookupMs
         - performance.visitLookupMs
         - performance.photosLookupMs
+        - performance.photosLookupRetryMs
         - performance.visitUpdateMs
         - performance.buildingUpdateMs
         - performance.requestLogWriteMs
@@ -2123,6 +2166,17 @@ function readSheetRecordsByField_(
       return String(record.values[fieldIndex]).trim()
         === String(expectedValue).trim();
     });
+}
+
+function readActiveRecordPhotosForVisit_(spreadsheet, visitId) {
+  return readSheetRecordsByField_(
+    spreadsheet,
+    'Photos',
+    'visitId',
+    visitId
+  ).filter(function(record) {
+    return !sheetBoolean_(record.object.isDeleted);
+  });
 }
 
 function appendSheetRow_(spreadsheet, sheetName, row) {
@@ -2840,7 +2894,7 @@ function testRecordRowCachePatchLoaded() {
     }
     console.log(JSON.stringify({
       ok: true,
-      stage: '5-4A.8',
+      stage: '5-4A.11',
       mode: 'row_cache_round_trip',
       buildingRowNumber: cached.buildingRowNumber,
       visitRowNumber: cached.visitRowNumber
@@ -2849,3 +2903,24 @@ function testRecordRowCachePatchLoaded() {
     CacheService.getScriptCache().remove(cacheKey);
   }
 }
+
+/**
+ * 段階5-4A.11の並列Photos書込保護設定が読み込まれていることを確認する。
+ * Spreadsheet / Driveは変更しない。
+ */
+function testRecordParallelSheetWritePatchLoaded() {
+  if (
+    RECORD_FINALIZE_PHOTO_RETRY_COUNT !== 2 ||
+    RECORD_FINALIZE_PHOTO_RETRY_DELAY_MS !== 150
+  ) {
+    throw new Error('並列Photos書込保護設定が想定値ではありません。');
+  }
+  console.log(JSON.stringify({
+    ok: true,
+    stage: '5-4A.11',
+    mode: 'parallel_sheet_write_guard',
+    finalizeRetryCount: RECORD_FINALIZE_PHOTO_RETRY_COUNT,
+    finalizeRetryDelayMs: RECORD_FINALIZE_PHOTO_RETRY_DELAY_MS
+  }));
+}
+
