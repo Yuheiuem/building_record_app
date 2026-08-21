@@ -178,7 +178,7 @@ class RecordDraftController extends ChangeNotifier {
       _submissionPhase == RecordSubmissionPhase.starting ||
       _submissionPhase == RecordSubmissionPhase.uploading ||
       _submissionPhase == RecordSubmissionPhase.finalizing;
-  bool get isDraftLocked => _beginRequestId != null;
+  bool get isDraftLocked => _beginRequestId != null || isSubmitting;
   bool get canSubmitRecord =>
       !isSubmitting && !submissionSucceeded && !_requiresReauthentication;
   int get uploadedPhotoCount =>
@@ -704,7 +704,34 @@ class RecordDraftController extends ChangeNotifier {
       return;
     }
 
-    final String idToken = _authService.idToken!;
+    _submissionErrorMessage = null;
+    _submissionErrorDetail = null;
+    _submissionNoticeMessage = null;
+    _submissionOperationMessage = 'Googleログイン情報の有効期限を確認しています。';
+    _submissionStartedAt = DateTime.now();
+    _lastSubmissionDuration = null;
+    _lastPreparationDuration = null;
+    _lastPhotoUploadDuration = null;
+    _lastFinalizeDuration = null;
+    _lastCombinedSaveDuration = null;
+    _submissionPhase = RecordSubmissionPhase.starting;
+    notifyListeners();
+
+    final Stopwatch submissionStopwatch = Stopwatch()..start();
+    final String? guardedIdToken = await _resolveSubmissionIdToken();
+    if (guardedIdToken == null) {
+      submissionStopwatch.stop();
+      _lastSubmissionDuration = submissionStopwatch.elapsed;
+      _submissionPhase = RecordSubmissionPhase.failed;
+      _submissionOperationMessage = 'Googleログイン情報を更新してください。';
+      _submissionErrorMessage = 'Googleログイン情報を更新できませんでした。';
+      _submissionErrorDetail =
+          '入力内容は保持されています。上のGoogleログインから認証を更新し、もう一度保存してください。';
+      notifyListeners();
+      return;
+    }
+
+    final String idToken = guardedIdToken;
     final RecordDraftLocation location = _visitLocation!;
     const Uuid uuid = Uuid();
 
@@ -729,20 +756,9 @@ class RecordDraftController extends ChangeNotifier {
       }
     }
 
-    _submissionErrorMessage = null;
-    _submissionErrorDetail = null;
-    _submissionNoticeMessage = null;
     _submissionOperationMessage = '保存処理を開始しています。';
-    _submissionStartedAt = DateTime.now();
-    _lastSubmissionDuration = null;
-    _lastPreparationDuration = null;
-    _lastPhotoUploadDuration = null;
-    _lastFinalizeDuration = null;
-    _lastCombinedSaveDuration = null;
-    _submissionPhase = RecordSubmissionPhase.starting;
     notifyListeners();
 
-    final Stopwatch submissionStopwatch = Stopwatch()..start();
     bool refreshBootstrapAfterSuccess = false;
 
     try {
@@ -753,8 +769,7 @@ class RecordDraftController extends ChangeNotifier {
       _currentUploadingPhotoId = null;
       if (failedDetails.isNotEmpty) {
         _submissionPhase = RecordSubmissionPhase.failed;
-        _submissionOperationMessage =
-            '送信に失敗しました。送信済みの写真は保持しています。';
+        _submissionOperationMessage = '送信に失敗しました。送信済みの写真は保持しています。';
         if (_requiresReauthentication) {
           _submissionErrorMessage = 'ログインの有効期限が切れました。';
           _submissionErrorDetail = '入力内容と送信済み写真は保持されています。認証更新後にもう一度保存してください。';
@@ -784,8 +799,7 @@ class RecordDraftController extends ChangeNotifier {
       notifyListeners();
     } on RecordSubmissionApiException catch (error) {
       _submissionPhase = RecordSubmissionPhase.failed;
-      _submissionOperationMessage =
-          '送信に失敗しました。送信済みの内容は保持しています。';
+      _submissionOperationMessage = '送信に失敗しました。送信済みの内容は保持しています。';
       _currentUploadingPhotoId = null;
       if (_isAuthenticationRequired(error.errorCode)) {
         _markAuthenticationRequired(idToken);
@@ -798,8 +812,7 @@ class RecordDraftController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {
       _submissionPhase = RecordSubmissionPhase.failed;
-      _submissionOperationMessage =
-          '保存中に予期しないエラーが発生しました。';
+      _submissionOperationMessage = '保存中に予期しないエラーが発生しました。';
       _currentUploadingPhotoId = null;
       _submissionErrorMessage = '送信できませんでした。もう一度送信してください。';
       _submissionErrorDetail = '記録の保存中に予期しないエラーが発生しました。';
@@ -815,6 +828,45 @@ class RecordDraftController extends ChangeNotifier {
     }
   }
 
+  Future<String?> _resolveSubmissionIdToken() async {
+    final String? currentToken = _authService.idToken;
+    if (currentToken == null || currentToken.isEmpty) {
+      return null;
+    }
+
+    if (_authService.hasIdTokenValidity(
+      AppConfig.recordSubmissionMinTokenValidity,
+    )) {
+      _submissionOperationMessage = 'Googleログイン情報を確認しました。保存を開始します。';
+      notifyListeners();
+      return currentToken;
+    }
+
+    _submissionOperationMessage = 'Googleログイン情報の期限が近いため、認証を更新しています。';
+    notifyListeners();
+
+    final bool refreshed = await _authService.refreshIdToken();
+    final String? refreshedToken = _authService.idToken;
+    final bool hasUsableToken =
+        refreshed &&
+        refreshedToken != null &&
+        refreshedToken.isNotEmpty &&
+        _authService.hasIdTokenValidity(
+          AppConfig.recordSubmissionMinTokenValidity,
+        );
+
+    if (!hasUsableToken) {
+      _markAuthenticationRequired(currentToken);
+      return null;
+    }
+
+    _requiresReauthentication = false;
+    _authenticationFailureToken = null;
+    _submissionOperationMessage = '認証を更新しました。保存を開始します。';
+    notifyListeners();
+    return refreshedToken;
+  }
+
   Future<List<String>> _submitSinglePhotoRecord(
     String idToken,
     RecordDraftLocation location,
@@ -826,8 +878,7 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     _submissionPhase = RecordSubmissionPhase.finalizing;
-    _submissionOperationMessage =
-        '建物・訪問・写真を送信用データへ変換して保存しています。';
+    _submissionOperationMessage = '建物・訪問・写真を送信用データへ変換して保存しています。';
     _currentUploadingPhotoId = photo.photoId;
     _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploading;
     notifyListeners();
@@ -1006,8 +1057,7 @@ class RecordDraftController extends ChangeNotifier {
           notifyListeners();
 
           if (failedDetails.isNotEmpty) {
-            _submissionOperationMessage =
-                '一部の写真送信に失敗しました。失敗分だけ再送できます。';
+            _submissionOperationMessage = '一部の写真送信に失敗しました。失敗分だけ再送できます。';
             return failedDetails;
           }
         }
@@ -1019,8 +1069,7 @@ class RecordDraftController extends ChangeNotifier {
 
     if (_finalizeRecordResult == null) {
       _submissionPhase = RecordSubmissionPhase.finalizing;
-      _submissionOperationMessage =
-          '保存した写真を確認して記録を確定しています。';
+      _submissionOperationMessage = '保存した写真を確認して記録を確定しています。';
       _currentUploadingPhotoId = null;
       notifyListeners();
 
