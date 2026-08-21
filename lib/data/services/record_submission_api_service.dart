@@ -292,49 +292,62 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     _photoUploadFlushRunning = true;
     try {
       while (!_closed && _queuedPhotoUploads.isNotEmpty) {
-        final int batchSize = _queuedPhotoUploads.length >= 2 ? 2 : 1;
-        final List<_QueuedPhotoUpload> batch = _queuedPhotoUploads
-            .take(batchSize)
-            .toList(growable: false);
-        _queuedPhotoUploads.removeRange(0, batchSize);
-
-        if (batch.length == 1) {
-          final _QueuedPhotoUpload item = batch.single;
-          try {
-            final UploadRecordPhotoResult result = await _uploadPhotoImmediately(
-              requestId: item.requestId,
-              clientVersion: item.clientVersion,
-              idToken: item.idToken,
-              buildingId: item.buildingId,
-              visitId: item.visitId,
-              photoId: item.photoId,
-              fileName: item.fileName,
-              mimeType: item.mimeType,
-              bytes: item.bytes,
-              takenAt: item.takenAt,
-              latitude: item.latitude,
-              longitude: item.longitude,
-              accuracyM: item.accuracyM,
-              locationSource: item.locationSource,
-              displayOrder: item.displayOrder,
-            );
-            if (!item.completer.isCompleted) {
-              item.completer.complete(result);
-            }
-          } catch (error, stackTrace) {
-            if (!item.completer.isCompleted) {
-              item.completer.completeError(error, stackTrace);
-            }
-          }
-          continue;
+        final List<List<_QueuedPhotoUpload>> parallelBatches =
+            <List<_QueuedPhotoUpload>>[];
+        for (
+          int index = 0;
+          index < 2 && _queuedPhotoUploads.isNotEmpty;
+          index += 1
+        ) {
+          final int batchSize = _queuedPhotoUploads.length >= 2 ? 2 : 1;
+          final List<_QueuedPhotoUpload> batch = _queuedPhotoUploads
+              .take(batchSize)
+              .toList(growable: false);
+          _queuedPhotoUploads.removeRange(0, batchSize);
+          parallelBatches.add(batch);
         }
 
-        await _uploadPhotoBatch(batch);
+        await Future.wait<void>(parallelBatches.map(_uploadPhotoBatchOrSingle));
       }
     } finally {
       _photoUploadFlushRunning = false;
       if (!_closed && _queuedPhotoUploads.isNotEmpty) {
         _schedulePhotoUploadFlush();
+      }
+    }
+  }
+
+  Future<void> _uploadPhotoBatchOrSingle(List<_QueuedPhotoUpload> batch) async {
+    if (batch.length >= 2) {
+      await _uploadPhotoBatch(batch);
+      return;
+    }
+
+    final _QueuedPhotoUpload item = batch.single;
+    try {
+      final UploadRecordPhotoResult result = await _uploadPhotoImmediately(
+        requestId: item.requestId,
+        clientVersion: item.clientVersion,
+        idToken: item.idToken,
+        buildingId: item.buildingId,
+        visitId: item.visitId,
+        photoId: item.photoId,
+        fileName: item.fileName,
+        mimeType: item.mimeType,
+        bytes: item.bytes,
+        takenAt: item.takenAt,
+        latitude: item.latitude,
+        longitude: item.longitude,
+        accuracyM: item.accuracyM,
+        locationSource: item.locationSource,
+        displayOrder: item.displayOrder,
+      );
+      if (!item.completer.isCompleted) {
+        item.completer.complete(result);
+      }
+    } catch (error, stackTrace) {
+      if (!item.completer.isCompleted) {
+        item.completer.completeError(error, stackTrace);
       }
     }
   }
@@ -368,27 +381,29 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
               clientVersion: prepared.first.item.clientVersion,
               idToken: prepared.first.item.idToken,
               payload: <String, Object?>{
-                'photos': prepared.map((_PreparedQueuedPhotoUpload preparedItem) {
-                  final _QueuedPhotoUpload item = preparedItem.item;
-                  return <String, Object?>{
-                    'requestId': item.requestId,
-                    'payload': <String, Object?>{
-                      'buildingId': item.buildingId,
-                      'visitId': item.visitId,
-                      'photoId': item.photoId,
-                      'fileName': item.fileName,
-                      'mimeType': item.mimeType,
-                      'byteSize': item.bytes.length,
-                      'base64Data': preparedItem.base64Data,
-                      'takenAt': item.takenAt.toIso8601String(),
-                      'latitude': item.latitude,
-                      'longitude': item.longitude,
-                      'accuracyM': item.accuracyM,
-                      'locationSource': item.locationSource,
-                      'displayOrder': item.displayOrder,
-                    },
-                  };
-                }).toList(growable: false),
+                'photos': prepared
+                    .map((_PreparedQueuedPhotoUpload preparedItem) {
+                      final _QueuedPhotoUpload item = preparedItem.item;
+                      return <String, Object?>{
+                        'requestId': item.requestId,
+                        'payload': <String, Object?>{
+                          'buildingId': item.buildingId,
+                          'visitId': item.visitId,
+                          'photoId': item.photoId,
+                          'fileName': item.fileName,
+                          'mimeType': item.mimeType,
+                          'byteSize': item.bytes.length,
+                          'base64Data': preparedItem.base64Data,
+                          'takenAt': item.takenAt.toIso8601String(),
+                          'latitude': item.latitude,
+                          'longitude': item.longitude,
+                          'accuracyM': item.accuracyM,
+                          'locationSource': item.locationSource,
+                          'displayOrder': item.displayOrder,
+                        },
+                      };
+                    })
+                    .toList(growable: false),
               },
               timeout: _batchUploadTimeout,
             );
@@ -434,8 +449,7 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
           if (!item.completer.isCompleted) {
             item.completer.completeError(
               RecordSubmissionApiException(
-                _optionalString(itemResponse['message']) ??
-                    '写真を保存できませんでした。',
+                _optionalString(itemResponse['message']) ?? '写真を保存できませんでした。',
                 errorCode: _optionalString(itemResponse['errorCode']),
               ),
             );

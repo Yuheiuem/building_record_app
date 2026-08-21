@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -23,25 +24,28 @@ void main() {
           'ok': true,
           'requestId': body['requestId'],
           'data': <String, Object?>{
-            'results': photos.map((dynamic rawItem) {
-              final Map<String, dynamic> item = rawItem as Map<String, dynamic>;
-              final Map<String, dynamic> payload =
-                  item['payload'] as Map<String, dynamic>;
-              return <String, Object?>{
-                'requestId': item['requestId'],
-                'photoId': payload['photoId'],
-                'ok': true,
-                'data': _photoResult(
-                  photoId: payload['photoId'] as String,
-                  byteSize: payload['byteSize'] as int,
-                  displayOrder: payload['displayOrder'] as int,
-                ),
-                'errorCode': null,
-                'message': null,
-              };
-            }).toList(growable: false),
+            'results': photos
+                .map((dynamic rawItem) {
+                  final Map<String, dynamic> item =
+                      rawItem as Map<String, dynamic>;
+                  final Map<String, dynamic> payload =
+                      item['payload'] as Map<String, dynamic>;
+                  return <String, Object?>{
+                    'requestId': item['requestId'],
+                    'photoId': payload['photoId'],
+                    'ok': true,
+                    'data': _photoResult(
+                      photoId: payload['photoId'] as String,
+                      byteSize: payload['byteSize'] as int,
+                      displayOrder: payload['displayOrder'] as int,
+                    ),
+                    'errorCode': null,
+                    'message': null,
+                  };
+                })
+                .toList(growable: false),
             'batchSize': photos.length,
-            'stage': '5-4A.9',
+            'stage': '5-4A.10',
           },
           'errorCode': null,
           'message': null,
@@ -59,7 +63,7 @@ void main() {
 
     final Future<UploadRecordPhotoResult> first = service.uploadPhoto(
       requestId: 'request-a',
-      clientVersion: 'v0.19.9',
+      clientVersion: 'v0.19.10',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -76,7 +80,7 @@ void main() {
     );
     final Future<UploadRecordPhotoResult> second = service.uploadPhoto(
       requestId: 'request-b',
-      clientVersion: 'v0.19.9',
+      clientVersion: 'v0.19.10',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -105,9 +109,114 @@ void main() {
             as List<dynamic>;
     expect(sentPhotos, hasLength(2));
     expect(
-      sentPhotos.map((dynamic item) => (item as Map<String, dynamic>)['requestId']),
+      sentPhotos.map(
+        (dynamic item) => (item as Map<String, dynamic>)['requestId'],
+      ),
       <String>['request-a', 'request-b'],
     );
+
+    service.close();
+  });
+
+  test('4枚同時要求は2枚バッチ2本を最大2本並行で送る', () async {
+    final List<Map<String, dynamic>> requestBodies = <Map<String, dynamic>>[];
+    final Completer<void> bothBatchRequestsStarted = Completer<void>();
+    int activeBatchRequests = 0;
+    int maxActiveBatchRequests = 0;
+
+    final MockClient client = MockClient((http.Request request) async {
+      final Map<String, dynamic> body =
+          jsonDecode(request.body) as Map<String, dynamic>;
+      requestBodies.add(body);
+      expect(body['action'], 'uploadPhotosBatch');
+      activeBatchRequests += 1;
+      if (activeBatchRequests > maxActiveBatchRequests) {
+        maxActiveBatchRequests = activeBatchRequests;
+      }
+      if (requestBodies.length == 2 && !bothBatchRequestsStarted.isCompleted) {
+        bothBatchRequestsStarted.complete();
+      }
+
+      await bothBatchRequestsStarted.future.timeout(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      final List<dynamic> photos =
+          (body['payload'] as Map<String, dynamic>)['photos'] as List<dynamic>;
+      activeBatchRequests -= 1;
+      return http.Response(
+        jsonEncode(<String, Object?>{
+          'ok': true,
+          'requestId': body['requestId'],
+          'data': <String, Object?>{
+            'results': photos
+                .map((dynamic rawItem) {
+                  final Map<String, dynamic> item =
+                      rawItem as Map<String, dynamic>;
+                  final Map<String, dynamic> payload =
+                      item['payload'] as Map<String, dynamic>;
+                  return <String, Object?>{
+                    'requestId': item['requestId'],
+                    'photoId': payload['photoId'],
+                    'ok': true,
+                    'data': _photoResult(
+                      photoId: payload['photoId'] as String,
+                      byteSize: payload['byteSize'] as int,
+                      displayOrder: payload['displayOrder'] as int,
+                    ),
+                    'errorCode': null,
+                    'message': null,
+                  };
+                })
+                .toList(growable: false),
+            'batchSize': photos.length,
+            'stage': '5-4A.10',
+          },
+          'errorCode': null,
+          'message': null,
+        }),
+        200,
+      );
+    });
+    final HttpRecordSubmissionApiService service =
+        HttpRecordSubmissionApiService(
+          client: client,
+          endpoint: Uri.parse('https://example.test/exec'),
+          thumbnailService: const _NullThumbnailService(),
+          deferredThumbnailQuietDelay: Duration.zero,
+        );
+
+    final List<Future<UploadRecordPhotoResult>> futures =
+        List<Future<UploadRecordPhotoResult>>.generate(4, (int index) {
+          return service.uploadPhoto(
+            requestId: 'request-$index',
+            clientVersion: 'v0.19.10',
+            idToken: 'token',
+            buildingId: 'building-1',
+            visitId: 'visit-1',
+            photoId: 'photo-$index',
+            fileName: '$index.jpg',
+            mimeType: 'image/jpeg',
+            bytes: Uint8List.fromList(<int>[index + 1]),
+            takenAt: DateTime.utc(2026, 8, 19, 3, index),
+            latitude: 35.0,
+            longitude: 139.0,
+            accuracyM: 5.0,
+            locationSource: 'gps',
+            displayOrder: index,
+          );
+        });
+
+    final List<UploadRecordPhotoResult> results =
+        await Future.wait<UploadRecordPhotoResult>(futures);
+
+    expect(results, hasLength(4));
+    expect(requestBodies, hasLength(2));
+    expect(maxActiveBatchRequests, 2);
+    for (final Map<String, dynamic> body in requestBodies) {
+      final List<dynamic> photos =
+          (body['payload'] as Map<String, dynamic>)['photos'] as List<dynamic>;
+      expect(photos, hasLength(2));
+    }
 
     service.close();
   });
@@ -118,12 +227,10 @@ void main() {
           jsonDecode(request.body) as Map<String, dynamic>;
       final List<dynamic> photos =
           (body['payload'] as Map<String, dynamic>)['photos'] as List<dynamic>;
-      final Map<String, dynamic> firstItem =
-          photos[0] as Map<String, dynamic>;
+      final Map<String, dynamic> firstItem = photos[0] as Map<String, dynamic>;
       final Map<String, dynamic> firstPayload =
           firstItem['payload'] as Map<String, dynamic>;
-      final Map<String, dynamic> secondItem =
-          photos[1] as Map<String, dynamic>;
+      final Map<String, dynamic> secondItem = photos[1] as Map<String, dynamic>;
       final Map<String, dynamic> secondPayload =
           secondItem['payload'] as Map<String, dynamic>;
 
@@ -153,7 +260,7 @@ void main() {
                 },
               ],
               'batchSize': 2,
-              'stage': '5-4A.9',
+              'stage': '5-4A.10',
             },
             'errorCode': null,
             'message': null,
@@ -175,7 +282,7 @@ void main() {
 
     final Future<UploadRecordPhotoResult> successFuture = service.uploadPhoto(
       requestId: 'request-success',
-      clientVersion: 'v0.19.9',
+      clientVersion: 'v0.19.10',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -192,7 +299,7 @@ void main() {
     );
     final Future<UploadRecordPhotoResult> failureFuture = service.uploadPhoto(
       requestId: 'request-failure',
-      clientVersion: 'v0.19.9',
+      clientVersion: 'v0.19.10',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',

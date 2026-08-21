@@ -913,23 +913,23 @@ class RecordDraftController extends ChangeNotifier {
     if (pendingPhotos.isNotEmpty) {
       final Stopwatch photoUploadStopwatch = Stopwatch()..start();
       try {
-        for (int offset = 0; offset < pendingPhotos.length; offset += 2) {
-          final int end = (offset + 2).clamp(0, pendingPhotos.length).toInt();
-          final List<RecordDraftPhoto> batch = pendingPhotos.sublist(
+        for (int offset = 0; offset < pendingPhotos.length; offset += 4) {
+          final int end = (offset + 4).clamp(0, pendingPhotos.length).toInt();
+          final List<RecordDraftPhoto> wave = pendingPhotos.sublist(
             offset,
             end,
           );
 
           _submissionPhase = RecordSubmissionPhase.uploading;
-          _currentUploadingPhotoId = batch.first.photoId;
-          for (final RecordDraftPhoto photo in batch) {
+          _currentUploadingPhotoId = wave.first.photoId;
+          for (final RecordDraftPhoto photo in wave) {
             _photoUploadStatuses[photo.photoId] =
                 RecordPhotoUploadStatus.uploading;
           }
           notifyListeners();
 
           final List<_PhotoUploadAttempt> attempts = await Future.wait(
-            batch.map((RecordDraftPhoto photo) {
+            wave.map((RecordDraftPhoto photo) {
               return _uploadPhotoForMultipleRecord(
                 idToken: idToken,
                 location: location,
