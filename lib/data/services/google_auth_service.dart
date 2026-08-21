@@ -77,24 +77,70 @@ class GoogleAuthService extends AuthService {
     await initialize();
 
     final String? previousToken = _idToken;
+    final Completer<GoogleSignInAccount?> eventCompleter =
+        Completer<GoogleSignInAccount?>();
+
+    final StreamSubscription<GoogleSignInAuthenticationEvent>
+    refreshSubscription = _googleSignIn.authenticationEvents.listen(
+      (GoogleSignInAuthenticationEvent event) {
+        final GoogleSignInAccount? account = switch (event) {
+          GoogleSignInAuthenticationEventSignIn() => event.user,
+          GoogleSignInAuthenticationEventSignOut() => null,
+        };
+
+        if (account == null) {
+          if (!eventCompleter.isCompleted) {
+            eventCompleter.complete(null);
+          }
+          return;
+        }
+
+        final String? token = account.authentication.idToken;
+        if (token != null &&
+            token.isNotEmpty &&
+            token != previousToken &&
+            !eventCompleter.isCompleted) {
+          eventCompleter.complete(account);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!eventCompleter.isCompleted) {
+          eventCompleter.completeError(error, stackTrace);
+        }
+      },
+    );
+
     try {
       final Future<GoogleSignInAccount?>? attempt = _googleSignIn
           .attemptLightweightAuthentication(reportAllExceptions: true);
-      if (attempt == null) {
-        return false;
+
+      GoogleSignInAccount? account;
+      if (attempt != null) {
+        account = await attempt;
+        if (!_hasFreshToken(account, previousToken)) {
+          account = await eventCompleter.future.timeout(
+            const Duration(seconds: 3),
+            onTimeout: () => null,
+          );
+        }
+      } else {
+        // Web/FedCMでは軽量認証がFutureを返さず、
+        // authenticationEventsだけで結果が通知される場合がある。
+        account = await eventCompleter.future.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => null,
+        );
       }
 
-      final GoogleSignInAccount? account = await attempt;
-      final String? refreshedToken = account?.authentication.idToken;
-      if (account == null ||
-          refreshedToken == null ||
-          refreshedToken.isEmpty ||
-          refreshedToken == previousToken) {
-        return false;
+      if (_hasFreshToken(account, previousToken)) {
+        _setSignedIn(account!);
+        return true;
       }
 
-      _setSignedIn(account);
-      return true;
+      final String? currentToken = _idToken;
+      return currentToken != null &&
+          currentToken.isNotEmpty &&
+          currentToken != previousToken;
     } on Object catch (error) {
       _errorMessage = _messageFromError(
         error,
@@ -102,7 +148,14 @@ class GoogleAuthService extends AuthService {
       );
       notifyListeners();
       return false;
+    } finally {
+      await refreshSubscription.cancel();
     }
+  }
+
+  bool _hasFreshToken(GoogleSignInAccount? account, String? previousToken) {
+    final String? token = account?.authentication.idToken;
+    return token != null && token.isNotEmpty && token != previousToken;
   }
 
   @override

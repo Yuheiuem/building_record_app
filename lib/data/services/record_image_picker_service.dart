@@ -21,8 +21,7 @@ class RecordImagePickProgress {
 
   String get message {
     return switch (phase) {
-      RecordImagePickProgressPhase.selectingAndConverting =>
-        '写真を選択・変換しています。',
+      RecordImagePickProgressPhase.selectingAndConverting => '写真を選択・変換しています。',
       RecordImagePickProgressPhase.readingFiles =>
         fileName == null || fileName!.isEmpty
             ? '写真を読み込んでいます（$current/$total）。'

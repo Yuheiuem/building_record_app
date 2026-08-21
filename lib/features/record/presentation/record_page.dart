@@ -641,8 +641,7 @@ class _LiveSubmissionElapsed extends StatefulWidget {
   final DateTime startedAt;
 
   @override
-  State<_LiveSubmissionElapsed> createState() =>
-      _LiveSubmissionElapsedState();
+  State<_LiveSubmissionElapsed> createState() => _LiveSubmissionElapsedState();
 }
 
 class _LiveSubmissionElapsedState extends State<_LiveSubmissionElapsed> {
@@ -683,9 +682,9 @@ class _LiveSubmissionElapsedState extends State<_LiveSubmissionElapsed> {
       key: const Key('record-live-submission-elapsed'),
       '経過 ${_formatClockDuration(_elapsed)}',
       textAlign: TextAlign.center,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        fontWeight: FontWeight.w600,
-      ),
+      style: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
     );
   }
 }
@@ -1811,7 +1810,9 @@ class _ExistingBuildingDraftForm extends StatelessWidget {
                         selected:
                             selectedBuilding?.buildingId == building.buildingId,
                         onTap: () {
-                          controller.selectExistingBuilding(building.buildingId);
+                          controller.selectExistingBuilding(
+                            building.buildingId,
+                          );
                         },
                         leading: const Icon(Icons.location_city_outlined),
                         title: Text(building.buildingName),

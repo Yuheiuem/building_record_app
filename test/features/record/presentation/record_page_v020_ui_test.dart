@@ -16,9 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('写真の選択・変換中は現在の処理ステータスを表示する', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('写真の選択・変換中は現在の処理ステータスを表示する', (WidgetTester tester) async {
     final _ProgressImagePickerService picker = _ProgressImagePickerService();
 
     await tester.pumpWidget(
@@ -51,9 +49,7 @@ void main() {
     );
   });
 
-  testWidgets('写真が増えても写真一覧は画面高の約7割以内で内部スクロールする', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('写真が増えても写真一覧は画面高の約7割以内で内部スクロールする', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(430, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -86,9 +82,7 @@ void main() {
     expect(tester.getSize(scrollArea).height, lessThanOrEqualTo(560.1));
   });
 
-  testWidgets('既存建物が増えても検索結果だけを画面高の約7割以内でスクロールする', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('既存建物が増えても検索結果だけを画面高の約7割以内でスクロールする', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(430, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
