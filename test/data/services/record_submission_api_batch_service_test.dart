@@ -45,7 +45,7 @@ void main() {
                 })
                 .toList(growable: false),
             'batchSize': photos.length,
-            'stage': '5-4A.10',
+            'stage': '5-4A.12',
           },
           'errorCode': null,
           'message': null,
@@ -63,7 +63,7 @@ void main() {
 
     final Future<UploadRecordPhotoResult> first = service.uploadPhoto(
       requestId: 'request-a',
-      clientVersion: 'v0.19.10',
+      clientVersion: 'v0.19.12',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -80,7 +80,7 @@ void main() {
     );
     final Future<UploadRecordPhotoResult> second = service.uploadPhoto(
       requestId: 'request-b',
-      clientVersion: 'v0.19.10',
+      clientVersion: 'v0.19.12',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -118,8 +118,9 @@ void main() {
     service.close();
   });
 
-  test('4枚同時要求は2枚バッチ2本を最大2本並行で送る', () async {
+  test('4枚同時要求は2枚バッチ2本を時間差付きで最大2本並行送信する', () async {
     final List<Map<String, dynamic>> requestBodies = <Map<String, dynamic>>[];
+    final List<DateTime> requestStartedAt = <DateTime>[];
     final Completer<void> bothBatchRequestsStarted = Completer<void>();
     int activeBatchRequests = 0;
     int maxActiveBatchRequests = 0;
@@ -128,6 +129,7 @@ void main() {
       final Map<String, dynamic> body =
           jsonDecode(request.body) as Map<String, dynamic>;
       requestBodies.add(body);
+      requestStartedAt.add(DateTime.now());
       expect(body['action'], 'uploadPhotosBatch');
       activeBatchRequests += 1;
       if (activeBatchRequests > maxActiveBatchRequests) {
@@ -137,7 +139,7 @@ void main() {
         bothBatchRequestsStarted.complete();
       }
 
-      await bothBatchRequestsStarted.future.timeout(const Duration(seconds: 1));
+      await bothBatchRequestsStarted.future.timeout(const Duration(seconds: 2));
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       final List<dynamic> photos =
@@ -169,7 +171,7 @@ void main() {
                 })
                 .toList(growable: false),
             'batchSize': photos.length,
-            'stage': '5-4A.10',
+            'stage': '5-4A.12',
           },
           'errorCode': null,
           'message': null,
@@ -183,13 +185,14 @@ void main() {
           endpoint: Uri.parse('https://example.test/exec'),
           thumbnailService: const _NullThumbnailService(),
           deferredThumbnailQuietDelay: Duration.zero,
+          parallelBatchStartDelay: const Duration(milliseconds: 50),
         );
 
     final List<Future<UploadRecordPhotoResult>> futures =
         List<Future<UploadRecordPhotoResult>>.generate(4, (int index) {
           return service.uploadPhoto(
             requestId: 'request-$index',
-            clientVersion: 'v0.19.10',
+            clientVersion: 'v0.19.12',
             idToken: 'token',
             buildingId: 'building-1',
             visitId: 'visit-1',
@@ -212,6 +215,11 @@ void main() {
     expect(results, hasLength(4));
     expect(requestBodies, hasLength(2));
     expect(maxActiveBatchRequests, 2);
+    expect(requestStartedAt, hasLength(2));
+    final Duration startGap = requestStartedAt[1].difference(
+      requestStartedAt[0],
+    );
+    expect(startGap, greaterThanOrEqualTo(const Duration(milliseconds: 40)));
     for (final Map<String, dynamic> body in requestBodies) {
       final List<dynamic> photos =
           (body['payload'] as Map<String, dynamic>)['photos'] as List<dynamic>;
@@ -260,7 +268,7 @@ void main() {
                 },
               ],
               'batchSize': 2,
-              'stage': '5-4A.10',
+              'stage': '5-4A.12',
             },
             'errorCode': null,
             'message': null,
@@ -282,7 +290,7 @@ void main() {
 
     final Future<UploadRecordPhotoResult> successFuture = service.uploadPhoto(
       requestId: 'request-success',
-      clientVersion: 'v0.19.10',
+      clientVersion: 'v0.19.12',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',
@@ -299,7 +307,7 @@ void main() {
     );
     final Future<UploadRecordPhotoResult> failureFuture = service.uploadPhoto(
       requestId: 'request-failure',
-      clientVersion: 'v0.19.10',
+      clientVersion: 'v0.19.12',
       idToken: 'token',
       buildingId: 'building-1',
       visitId: 'visit-1',

@@ -126,11 +126,13 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
     Uri? endpoint,
     RecordThumbnailService? thumbnailService,
     Duration deferredThumbnailQuietDelay = const Duration(seconds: 12),
+    Duration parallelBatchStartDelay = const Duration(milliseconds: 700),
   }) : _client = client ?? http.Client(),
        _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl),
        _thumbnailService =
            thumbnailService ?? const ImageRecordThumbnailService(),
-       _deferredThumbnailQuietDelay = deferredThumbnailQuietDelay;
+       _deferredThumbnailQuietDelay = deferredThumbnailQuietDelay,
+       _parallelBatchStartDelay = parallelBatchStartDelay;
 
   static const Duration _normalTimeout = Duration(seconds: 30);
   static const Duration _uploadTimeout = Duration(seconds: 60);
@@ -140,6 +142,7 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
   final Uri _endpoint;
   final RecordThumbnailService _thumbnailService;
   final Duration _deferredThumbnailQuietDelay;
+  final Duration _parallelBatchStartDelay;
   final List<_DeferredThumbnailUpload> _deferredThumbnailUploads =
       <_DeferredThumbnailUpload>[];
   final List<_QueuedPhotoUpload> _queuedPhotoUploads = <_QueuedPhotoUpload>[];
@@ -307,7 +310,23 @@ class HttpRecordSubmissionApiService implements RecordSubmissionApiService {
           parallelBatches.add(batch);
         }
 
-        await Future.wait<void>(parallelBatches.map(_uploadPhotoBatchOrSingle));
+        final List<Future<void>> batchRequests = <Future<void>>[];
+        for (int index = 0; index < parallelBatches.length; index += 1) {
+          final List<_QueuedPhotoUpload> batch = parallelBatches[index];
+          if (index == 0 || _parallelBatchStartDelay == Duration.zero) {
+            batchRequests.add(_uploadPhotoBatchOrSingle(batch));
+            continue;
+          }
+
+          batchRequests.add(
+            Future<void>.delayed(
+              _parallelBatchStartDelay,
+              () => _uploadPhotoBatchOrSingle(batch),
+            ),
+          );
+        }
+
+        await Future.wait<void>(batchRequests);
       }
     } finally {
       _photoUploadFlushRunning = false;
