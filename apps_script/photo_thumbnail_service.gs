@@ -34,12 +34,14 @@ function handleGetPhotoThumbnailData(requestId, payload, authContext) {
  * @param {string} photoId
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet=} spreadsheet
  * @param {Object=} preloadedPhotoRecord
+ * @param {boolean=} allowDeleted
  * @return {Object}
  */
 function getPhotoThumbnailResponseData_(
   photoId,
   spreadsheet,
-  preloadedPhotoRecord
+  preloadedPhotoRecord,
+  allowDeleted
 ) {
   var dataSpreadsheet = spreadsheet || getDataSpreadsheet_();
   var photoRecord = preloadedPhotoRecord || findBuildingDetailSheetRecord_(
@@ -49,7 +51,10 @@ function getPhotoThumbnailResponseData_(
     photoId
   );
 
-  if (photoRecord === null || sheetBoolean_(photoRecord.isDeleted)) {
+  if (
+    photoRecord === null ||
+    (sheetBoolean_(photoRecord.isDeleted) && allowDeleted !== true)
+  ) {
     throw createApiError_('NOT_FOUND', '写真が見つかりませんでした。');
   }
 

@@ -21,6 +21,7 @@ import '../../../data/services/building_cover_photo_api_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
 import '../../../data/services/building_information_api_service.dart';
 import '../../../data/services/building_location_api_service.dart';
+import '../../../data/services/photo_lifecycle_api_service.dart';
 import '../../../data/services/visit_information_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
 import '../../record/presentation/map_location_picker_page.dart';
@@ -35,6 +36,7 @@ class BuildingDetailPage extends StatefulWidget {
     this.bootstrapApiService,
     this.buildingInformationApiService,
     this.visitInformationApiService,
+    this.photoLifecycleApiService,
     this.enableNetworkTiles = true,
     super.key,
   });
@@ -47,6 +49,7 @@ class BuildingDetailPage extends StatefulWidget {
   final BootstrapApiService? bootstrapApiService;
   final BuildingInformationApiService? buildingInformationApiService;
   final VisitInformationApiService? visitInformationApiService;
+  final PhotoLifecycleApiService? photoLifecycleApiService;
   final bool enableNetworkTiles;
 
   @override
@@ -68,6 +71,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   late final bool _ownsInformationApiService;
   late final VisitInformationApiService _visitInformationApiService;
   late final bool _ownsVisitInformationApiService;
+  late final PhotoLifecycleApiService _photoLifecycleApiService;
+  late final bool _ownsPhotoLifecycleApiService;
 
   final Map<String, Future<BuildingPhotoData>> _thumbnailFutures =
       <String, Future<BuildingPhotoData>>{};
@@ -105,6 +110,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _ownsVisitInformationApiService = widget.visitInformationApiService == null;
     _visitInformationApiService =
         widget.visitInformationApiService ?? HttpVisitInformationApiService();
+    _ownsPhotoLifecycleApiService = widget.photoLifecycleApiService == null;
+    _photoLifecycleApiService =
+        widget.photoLifecycleApiService ?? HttpPhotoLifecycleApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -144,6 +152,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
     if (_ownsVisitInformationApiService) {
       _visitInformationApiService.close();
+    }
+    if (_ownsPhotoLifecycleApiService) {
+      _photoLifecycleApiService.close();
     }
     super.dispose();
   }
@@ -618,6 +629,179 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
   }
 
+  Future<void> _hidePhoto(BuildingPhoto photo) async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final bool confirmed = await _confirmHidePhoto(context, photo);
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _photoLifecycleApiService.hidePhoto(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+        photoId: photo.photoId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      _thumbnailFutures.remove(photo.photoId);
+      _fullPhotoFutures.remove(photo.photoId);
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('写真を非表示にしました。')));
+    } on PhotoLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '写真を非表示にできませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  Future<void> _deletePhotoPermanently(BuildingPhoto photo) async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final bool confirmed = await _confirmPermanentPhotoDeletion(
+      context,
+      photo,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _photoLifecycleApiService.deletePhotoPermanently(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+        photoId: photo.photoId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+      _thumbnailFutures.remove(photo.photoId);
+      _fullPhotoFutures.remove(photo.photoId);
+      setState(() {
+        _isLoading = false;
+      });
+      await _loadDetail();
+
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真をGoogle Driveから完全に削除しました。')),
+      );
+    } on PhotoLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '写真を完全削除できませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  Future<void> _openHiddenPhotoManager() async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    final bool? changed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return _HiddenPhotoManagerDialog(
+          apiService: _photoLifecycleApiService,
+          buildingId: detail.building.buildingId,
+          idToken: idToken,
+        );
+      },
+    );
+
+    if (!mounted || changed != true) {
+      return;
+    }
+
+    _thumbnailFutures.clear();
+    _fullPhotoFutures.clear();
+    await _loadDetail();
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -775,6 +959,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                     onRetryThumbnail: _retryThumbnail,
                     onOpenPhoto: _openPhoto,
                     onSetCoverPhoto: _setCoverPhoto,
+                    onHidePhoto: _hidePhoto,
+                    onDeletePhotoPermanently: _deletePhotoPermanently,
+                    onManageHiddenPhotos: _openHiddenPhotoManager,
                     onShowMore: shownPhotoCount < detail.photos.length
                         ? () {
                             setState(() {
@@ -1456,6 +1643,9 @@ class _PhotoGallerySection extends StatelessWidget {
     required this.onRetryThumbnail,
     required this.onOpenPhoto,
     required this.onSetCoverPhoto,
+    required this.onHidePhoto,
+    required this.onDeletePhotoPermanently,
+    required this.onManageHiddenPhotos,
     required this.onShowMore,
     required this.onOpenDrive,
   });
@@ -1467,6 +1657,9 @@ class _PhotoGallerySection extends StatelessWidget {
   final ValueChanged<BuildingPhoto> onRetryThumbnail;
   final ValueChanged<BuildingPhoto> onOpenPhoto;
   final ValueChanged<BuildingPhoto> onSetCoverPhoto;
+  final ValueChanged<BuildingPhoto> onHidePhoto;
+  final ValueChanged<BuildingPhoto> onDeletePhotoPermanently;
+  final VoidCallback onManageHiddenPhotos;
   final VoidCallback? onShowMore;
   final VoidCallback? onOpenDrive;
 
@@ -1524,6 +1717,9 @@ class _PhotoGallerySection extends StatelessWidget {
                     onRetry: () => onRetryThumbnail(photo),
                     onOpen: () => onOpenPhoto(photo),
                     onSetCoverPhoto: () => onSetCoverPhoto(photo),
+                    onHidePhoto: () => onHidePhoto(photo),
+                    onDeletePermanently: () =>
+                        onDeletePhotoPermanently(photo),
                   );
                 },
               ),
@@ -1536,6 +1732,13 @@ class _PhotoGallerySection extends StatelessWidget {
                 label: Text('すべて表示（残り${allPhotoCount - photos.length}枚）'),
               ),
             ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('manage-hidden-building-photos'),
+              onPressed: onManageHiddenPhotos,
+              icon: const Icon(Icons.visibility_off_outlined),
+              label: const Text('非表示写真を管理'),
+            ),
             if (onOpenDrive != null) ...<Widget>[
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -1552,6 +1755,8 @@ class _PhotoGallerySection extends StatelessWidget {
   }
 }
 
+enum _PhotoTileAction { hide, deletePermanently }
+
 class _AuthenticatedPhotoTile extends StatelessWidget {
   const _AuthenticatedPhotoTile({
     required this.photo,
@@ -1560,6 +1765,8 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
     required this.onRetry,
     required this.onOpen,
     required this.onSetCoverPhoto,
+    required this.onHidePhoto,
+    required this.onDeletePermanently,
     super.key,
   });
 
@@ -1569,6 +1776,8 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
   final VoidCallback onRetry;
   final VoidCallback onOpen;
   final VoidCallback onSetCoverPhoto;
+  final VoidCallback onHidePhoto;
+  final VoidCallback onDeletePermanently;
 
   @override
   Widget build(BuildContext context) {
@@ -1645,6 +1854,61 @@ class _AuthenticatedPhotoTile extends StatelessWidget {
                                     : null,
                                 size: 20,
                               ),
+                            ),
+                            const SizedBox(width: 2),
+                            PopupMenuButton<_PhotoTileAction>(
+                              key: ValueKey<String>(
+                                'photo-actions-${photo.photoId}',
+                              ),
+                              tooltip: '写真の操作',
+                              padding: EdgeInsets.zero,
+                              onSelected: (_PhotoTileAction action) {
+                                switch (action) {
+                                  case _PhotoTileAction.hide:
+                                    onHidePhoto();
+                                    return;
+                                  case _PhotoTileAction.deletePermanently:
+                                    onDeletePermanently();
+                                    return;
+                                }
+                              },
+                              itemBuilder: (BuildContext context) {
+                                final Color errorColor = Theme.of(
+                                  context,
+                                ).colorScheme.error;
+                                return <PopupMenuEntry<_PhotoTileAction>>[
+                                  PopupMenuItem<_PhotoTileAction>(
+                                    key: ValueKey<String>(
+                                      'hide-photo-${photo.photoId}',
+                                    ),
+                                    value: _PhotoTileAction.hide,
+                                    child: const ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: Icon(
+                                        Icons.visibility_off_outlined,
+                                      ),
+                                      title: Text('非表示にする'),
+                                    ),
+                                  ),
+                                  PopupMenuItem<_PhotoTileAction>(
+                                    key: ValueKey<String>(
+                                      'delete-photo-permanently-${photo.photoId}',
+                                    ),
+                                    value: _PhotoTileAction.deletePermanently,
+                                    child: ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: Icon(
+                                        Icons.delete_forever_outlined,
+                                        color: errorColor,
+                                      ),
+                                      title: Text(
+                                        '完全に削除',
+                                        style: TextStyle(color: errorColor),
+                                      ),
+                                    ),
+                                  ),
+                                ];
+                              },
                             ),
                             const SizedBox(width: 2),
                             const Icon(Icons.zoom_in, size: 18),
@@ -1807,6 +2071,566 @@ class _FullPhotoDialogState extends State<_FullPhotoDialog> {
                             Text(
                               '${widget.photo.width} × ${widget.photo.height}',
                             ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+        ),
+      ),
+    );
+  }
+}
+
+Future<bool> _confirmHidePhoto(
+  BuildContext context,
+  BuildingPhoto photo,
+) async {
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: const Text('写真を非表示にしますか？'),
+        content: Text(
+          '${photo.fileName}\n\n'
+          '通常の写真ギャラリーから隠します。Google Drive上の元画像とサムネイルは残るため、あとで復元できます。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            key: const Key('confirm-hide-photo'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('非表示にする'),
+          ),
+        ],
+      );
+    },
+  );
+  return confirmed ?? false;
+}
+
+Future<bool> _confirmPermanentPhotoDeletion(
+  BuildContext context,
+  BuildingPhoto photo,
+) async {
+  final ColorScheme colorScheme = Theme.of(context).colorScheme;
+  final bool? confirmed = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: Text(
+          '写真を完全に削除しますか？',
+          style: TextStyle(color: colorScheme.error),
+        ),
+        content: Text(
+          '${photo.fileName}\n\n'
+          'Google Drive上の元画像とサムネイルを完全に削除します。容量は解放されますが、この操作はアプリから元に戻せません。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            key: const Key('confirm-permanent-photo-deletion'),
+            style: FilledButton.styleFrom(
+              backgroundColor: colorScheme.error,
+              foregroundColor: colorScheme.onError,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('完全に削除'),
+          ),
+        ],
+      );
+    },
+  );
+  return confirmed ?? false;
+}
+
+class _HiddenPhotoManagerDialog extends StatefulWidget {
+  const _HiddenPhotoManagerDialog({
+    required this.apiService,
+    required this.buildingId,
+    required this.idToken,
+  });
+
+  final PhotoLifecycleApiService apiService;
+  final String buildingId;
+  final String idToken;
+
+  @override
+  State<_HiddenPhotoManagerDialog> createState() =>
+      _HiddenPhotoManagerDialogState();
+}
+
+class _HiddenPhotoManagerDialogState extends State<_HiddenPhotoManagerDialog> {
+  final List<BuildingPhoto> _photos = <BuildingPhoto>[];
+  bool _isLoading = false;
+  bool _isMutating = false;
+  bool _changed = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_load());
+    });
+  }
+
+  Future<void> _load() async {
+    if (_isLoading) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final List<BuildingPhoto> photos = await widget.apiService
+          .getHiddenBuildingPhotos(
+            requestId: const Uuid().v4(),
+            clientVersion: AppConfig.version,
+            idToken: widget.idToken,
+            buildingId: widget.buildingId,
+          );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _photos
+          ..clear()
+          ..addAll(photos);
+        _isLoading = false;
+      });
+    } on PhotoLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '非表示写真を取得できませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  Future<void> _preview(BuildingPhoto photo) async {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return _HiddenPhotoPreviewDialog(
+          apiService: widget.apiService,
+          idToken: widget.idToken,
+          photo: photo,
+        );
+      },
+    );
+  }
+
+  Future<void> _restore(BuildingPhoto photo) async {
+    if (_isMutating) {
+      return;
+    }
+    setState(() {
+      _isMutating = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.apiService.restorePhoto(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: widget.idToken,
+        buildingId: widget.buildingId,
+        photoId: photo.photoId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _photos.removeWhere(
+          (BuildingPhoto item) => item.photoId == photo.photoId,
+        );
+        _isMutating = false;
+        _changed = true;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('写真を復元しました。')));
+    } on PhotoLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMutating = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMutating = false;
+        _errorMessage = '写真を復元できませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  Future<void> _deletePermanently(BuildingPhoto photo) async {
+    if (_isMutating) {
+      return;
+    }
+    final bool confirmed = await _confirmPermanentPhotoDeletion(
+      context,
+      photo,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    setState(() {
+      _isMutating = true;
+      _errorMessage = null;
+    });
+    try {
+      await widget.apiService.deletePhotoPermanently(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: widget.idToken,
+        buildingId: widget.buildingId,
+        photoId: photo.photoId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _photos.removeWhere(
+          (BuildingPhoto item) => item.photoId == photo.photoId,
+        );
+        _isMutating = false;
+        _changed = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真をGoogle Driveから完全に削除しました。')),
+      );
+    } on PhotoLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMutating = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isMutating = false;
+        _errorMessage = '写真を完全削除できませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  void _close() {
+    Navigator.of(context).pop(_changed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('非表示写真を管理'),
+          leading: IconButton(
+            key: const Key('close-hidden-photo-manager'),
+            onPressed: _isMutating ? null : _close,
+            tooltip: '閉じる',
+            icon: const Icon(Icons.close),
+          ),
+          actions: <Widget>[
+            IconButton(
+              key: const Key('refresh-hidden-photos'),
+              onPressed: _isLoading || _isMutating ? null : _load,
+              tooltip: '再取得',
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Stack(
+            children: <Widget>[
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                children: <Widget>[
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Icon(Icons.info_outline),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              '非表示写真はDrive上に残っているため復元できます。'
+                              '「完全に削除」を選ぶと元画像とサムネイルを削除し、復元できなくなります。',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_errorMessage != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _InlineErrorMessage(message: _errorMessage!),
+                  ],
+                  const SizedBox(height: 12),
+                  if (_isLoading && _photos.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_photos.isEmpty)
+                    const _SectionEmptyState(
+                      icon: Icons.visibility_outlined,
+                      message: '非表示の写真はありません。',
+                    )
+                  else
+                    ..._photos.map((BuildingPhoto photo) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Card(
+                          key: ValueKey<String>(
+                            'hidden-photo-${photo.photoId}',
+                          ),
+                          margin: EdgeInsets.zero,
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                Text(
+                                  photo.fileName,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 12,
+                                  runSpacing: 4,
+                                  children: <Widget>[
+                                    Text(
+                                      _formatDateTime(
+                                        photo.takenAt ?? photo.createdAt,
+                                      ),
+                                    ),
+                                    Text(_formatBytes(photo.byteSize)),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  alignment: WrapAlignment.end,
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: <Widget>[
+                                    OutlinedButton.icon(
+                                      key: ValueKey<String>(
+                                        'preview-hidden-photo-${photo.photoId}',
+                                      ),
+                                      onPressed: _isMutating
+                                          ? null
+                                          : () => _preview(photo),
+                                      icon: const Icon(Icons.image_outlined),
+                                      label: const Text('確認'),
+                                    ),
+                                    FilledButton.tonalIcon(
+                                      key: ValueKey<String>(
+                                        'restore-hidden-photo-${photo.photoId}',
+                                      ),
+                                      onPressed: _isMutating
+                                          ? null
+                                          : () => _restore(photo),
+                                      icon: const Icon(Icons.restore),
+                                      label: const Text('復元'),
+                                    ),
+                                    TextButton.icon(
+                                      key: ValueKey<String>(
+                                        'delete-hidden-photo-${photo.photoId}',
+                                      ),
+                                      onPressed: _isMutating
+                                          ? null
+                                          : () => _deletePermanently(photo),
+                                      icon: Icon(
+                                        Icons.delete_forever_outlined,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                      ),
+                                      label: Text(
+                                        '完全に削除',
+                                        style: TextStyle(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.error,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              ),
+              if (_isMutating)
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: LinearProgressIndicator(),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HiddenPhotoPreviewDialog extends StatefulWidget {
+  const _HiddenPhotoPreviewDialog({
+    required this.apiService,
+    required this.idToken,
+    required this.photo,
+  });
+
+  final PhotoLifecycleApiService apiService;
+  final String idToken;
+  final BuildingPhoto photo;
+
+  @override
+  State<_HiddenPhotoPreviewDialog> createState() =>
+      _HiddenPhotoPreviewDialogState();
+}
+
+class _HiddenPhotoPreviewDialogState extends State<_HiddenPhotoPreviewDialog> {
+  late Future<BuildingPhotoData> _photoFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _photoFuture = _load();
+  }
+
+  Future<BuildingPhotoData> _load() {
+    return widget.apiService.getHiddenPhotoThumbnailData(
+      requestId: const Uuid().v4(),
+      clientVersion: AppConfig.version,
+      idToken: widget.idToken,
+      photoId: widget.photo.photoId,
+    );
+  }
+
+  void _retry() {
+    setState(() {
+      _photoFuture = _load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('非表示写真を確認'),
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            tooltip: '閉じる',
+            icon: const Icon(Icons.close),
+          ),
+        ),
+        body: FutureBuilder<BuildingPhotoData>(
+          future: _photoFuture,
+          builder:
+              (
+                BuildContext context,
+                AsyncSnapshot<BuildingPhotoData> snapshot,
+              ) {
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          const Icon(Icons.broken_image, size: 52),
+                          const SizedBox(height: 12),
+                          const Text('非表示写真を取得できませんでした。'),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            onPressed: _retry,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('再試行'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final BuildingPhotoData data = snapshot.data!;
+                return Column(
+                  children: <Widget>[
+                    Expanded(
+                      child: ColoredBox(
+                        color: Colors.black,
+                        child: Center(
+                          child: InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 5,
+                            child: Image.memory(data.bytes, fit: BoxFit.contain),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Wrap(
+                        spacing: 14,
+                        runSpacing: 6,
+                        alignment: WrapAlignment.center,
+                        children: <Widget>[
+                          Text(widget.photo.fileName),
+                          Text(
+                            _formatDateTime(
+                              widget.photo.takenAt ?? widget.photo.createdAt,
+                            ),
+                          ),
+                          Text(_formatBytes(widget.photo.byteSize)),
                         ],
                       ),
                     ),
