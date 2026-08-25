@@ -4,52 +4,76 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../core/config/app_config.dart';
-import '../models/building_detail_data.dart';
+import '../models/building.dart';
 
-abstract interface class PhotoLifecycleApiService {
-  Future<List<BuildingPhoto>> getHiddenBuildingPhotos({
+class BuildingLifecycleSummary {
+  const BuildingLifecycleSummary({
+    required this.building,
+    required this.visitCount,
+    required this.photoCount,
+    required this.photoBytes,
+  });
+
+  factory BuildingLifecycleSummary.fromJson(Map<String, dynamic> json) {
+    final Object? rawBuilding = json['building'];
+    if (rawBuilding is! Map<String, dynamic>) {
+      throw const FormatException('buildingがJSONオブジェクトではありません。');
+    }
+
+    return BuildingLifecycleSummary(
+      building: Building.fromJson(rawBuilding),
+      visitCount: _requiredInt(json['visitCount'], 'visitCount'),
+      photoCount: _requiredInt(json['photoCount'], 'photoCount'),
+      photoBytes: _requiredInt(json['photoBytes'], 'photoBytes'),
+    );
+  }
+
+  final Building building;
+  final int visitCount;
+  final int photoCount;
+  final int photoBytes;
+}
+
+abstract interface class BuildingLifecycleApiService {
+  Future<List<BuildingLifecycleSummary>> getHiddenBuildings({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+  });
+
+  Future<BuildingLifecycleSummary> getBuildingDeletionPreview({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
   });
 
-  Future<BuildingPhotoData> getHiddenPhotoThumbnailData({
-    required String requestId,
-    required String clientVersion,
-    required String idToken,
-    required String photoId,
-  });
-
-  Future<void> hidePhoto({
+  Future<void> hideBuilding({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   });
 
-  Future<void> restorePhoto({
+  Future<void> restoreBuilding({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   });
 
-  Future<void> deletePhotoPermanently({
+  Future<void> deleteBuildingPermanently({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   });
 
   void close();
 }
 
-class HttpPhotoLifecycleApiService implements PhotoLifecycleApiService {
-  HttpPhotoLifecycleApiService({http.Client? client, Uri? endpoint})
+class HttpBuildingLifecycleApiService implements BuildingLifecycleApiService {
+  HttpBuildingLifecycleApiService({http.Client? client, Uri? endpoint})
     : _client = client ?? http.Client(),
       _endpoint = endpoint ?? Uri.parse(AppConfig.appsScriptWebAppUrl);
 
@@ -59,135 +83,140 @@ class HttpPhotoLifecycleApiService implements PhotoLifecycleApiService {
   final Uri _endpoint;
 
   @override
-  Future<List<BuildingPhoto>> getHiddenBuildingPhotos({
+  Future<List<BuildingLifecycleSummary>> getHiddenBuildings({
+    required String requestId,
+    required String clientVersion,
+    required String idToken,
+  }) async {
+    final Map<String, dynamic> response = await _post(
+      action: 'getHiddenBuildings',
+      requestId: requestId,
+      clientVersion: clientVersion,
+      idToken: idToken,
+      payload: const <String, Object?>{},
+    );
+
+    final Map<String, dynamic> data = _requiredData(response);
+    final Object? rawBuildings = data['buildings'];
+    if (rawBuildings is! List<dynamic>) {
+      throw const BuildingLifecycleApiException('非表示建物の応答を読み取れませんでした。');
+    }
+
+    try {
+      return List<BuildingLifecycleSummary>.unmodifiable(
+        rawBuildings.map((dynamic item) {
+          if (item is! Map<String, dynamic>) {
+            throw const FormatException('建物情報がJSONオブジェクトではありません。');
+          }
+          return BuildingLifecycleSummary.fromJson(item);
+        }),
+      );
+    } on FormatException catch (error) {
+      throw BuildingLifecycleApiException(
+        '非表示建物の応答を読み取れませんでした。${error.message}',
+      );
+    }
+  }
+
+  @override
+  Future<BuildingLifecycleSummary> getBuildingDeletionPreview({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
   }) async {
     final Map<String, dynamic> response = await _post(
-      action: 'getHiddenBuildingPhotos',
+      action: 'getBuildingDeletionPreview',
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
       payload: <String, Object?>{'buildingId': buildingId},
     );
 
-    final Object? rawData = response['data'];
-    if (rawData is! Map<String, dynamic>) {
-      throw const PhotoLifecycleApiException('非表示写真の応答にdataがありません。');
+    final Map<String, dynamic> data = _requiredData(response);
+    final Object? rawSummary = data['summary'];
+    if (rawSummary is! Map<String, dynamic>) {
+      throw const BuildingLifecycleApiException('建物削除確認の応答を読み取れませんでした。');
     }
-    final Object? rawPhotos = rawData['photos'];
-    if (rawPhotos is! List<dynamic>) {
-      throw const PhotoLifecycleApiException('非表示写真の応答を読み取れませんでした。');
-    }
-
     try {
-      return List<BuildingPhoto>.unmodifiable(
-        rawPhotos.map((dynamic item) {
-          if (item is! Map<String, dynamic>) {
-            throw const FormatException('写真情報がJSONオブジェクトではありません。');
-          }
-          return BuildingPhoto.fromJson(item);
-        }),
-      );
+      return BuildingLifecycleSummary.fromJson(rawSummary);
     } on FormatException catch (error) {
-      throw PhotoLifecycleApiException('非表示写真の応答を読み取れませんでした。${error.message}');
-    }
-  }
-
-  @override
-  Future<BuildingPhotoData> getHiddenPhotoThumbnailData({
-    required String requestId,
-    required String clientVersion,
-    required String idToken,
-    required String photoId,
-  }) async {
-    final Map<String, dynamic> response = await _post(
-      action: 'getHiddenPhotoThumbnailData',
-      requestId: requestId,
-      clientVersion: clientVersion,
-      idToken: idToken,
-      payload: <String, Object?>{'photoId': photoId},
-    );
-    try {
-      return BuildingPhotoData.fromJson(response);
-    } on FormatException catch (error) {
-      throw PhotoLifecycleApiException(
-        '非表示写真のプレビューを読み取れませんでした。${error.message}',
+      throw BuildingLifecycleApiException(
+        '建物削除確認の応答を読み取れませんでした。${error.message}',
       );
     }
   }
 
   @override
-  Future<void> hidePhoto({
+  Future<void> hideBuilding({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   }) {
-    return _mutatePhoto(
-      action: 'hidePhoto',
+    return _mutateBuilding(
+      action: 'hideBuilding',
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
       buildingId: buildingId,
-      photoId: photoId,
     );
   }
 
   @override
-  Future<void> restorePhoto({
+  Future<void> restoreBuilding({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   }) {
-    return _mutatePhoto(
-      action: 'restorePhoto',
+    return _mutateBuilding(
+      action: 'restoreBuilding',
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
       buildingId: buildingId,
-      photoId: photoId,
     );
   }
 
   @override
-  Future<void> deletePhotoPermanently({
+  Future<void> deleteBuildingPermanently({
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   }) {
-    return _mutatePhoto(
-      action: 'deletePhotoPermanently',
+    return _mutateBuilding(
+      action: 'deleteBuildingPermanently',
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
       buildingId: buildingId,
-      photoId: photoId,
     );
   }
 
-  Future<void> _mutatePhoto({
+  Future<void> _mutateBuilding({
     required String action,
     required String requestId,
     required String clientVersion,
     required String idToken,
     required String buildingId,
-    required String photoId,
   }) async {
     await _post(
       action: action,
       requestId: requestId,
       clientVersion: clientVersion,
       idToken: idToken,
-      payload: <String, Object?>{'buildingId': buildingId, 'photoId': photoId},
+      payload: <String, Object?>{'buildingId': buildingId},
     );
+  }
+
+  Map<String, dynamic> _requiredData(Map<String, dynamic> response) {
+    final Object? rawData = response['data'];
+    if (rawData is! Map<String, dynamic>) {
+      throw const BuildingLifecycleApiException('Apps Scriptの応答にdataがありません。');
+    }
+    return rawData;
   }
 
   Future<Map<String, dynamic>> _post({
@@ -216,7 +245,7 @@ class HttpPhotoLifecycleApiService implements PhotoLifecycleApiService {
           )
           .timeout(_requestTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw PhotoLifecycleApiException(
+        throw BuildingLifecycleApiException(
           'Apps ScriptがHTTP ${response.statusCode}を返しました。',
           statusCode: response.statusCode,
         );
@@ -224,25 +253,27 @@ class HttpPhotoLifecycleApiService implements PhotoLifecycleApiService {
 
       final Object? decoded = jsonDecode(utf8.decode(response.bodyBytes));
       if (decoded is! Map<String, dynamic>) {
-        throw const PhotoLifecycleApiException(
+        throw const BuildingLifecycleApiException(
           'Apps Scriptの応答がJSONオブジェクトではありません。',
         );
       }
       if (decoded['ok'] != true) {
-        throw PhotoLifecycleApiException(
-          _optionalString(decoded['message']) ?? '写真を更新できませんでした。',
+        throw BuildingLifecycleApiException(
+          _optionalString(decoded['message']) ?? '建物を更新できませんでした。',
           errorCode: _optionalString(decoded['errorCode']),
         );
       }
       return decoded;
     } on TimeoutException {
-      throw const PhotoLifecycleApiException('Apps Scriptから時間内に応答がありませんでした。');
+      throw const BuildingLifecycleApiException(
+        'Apps Scriptから時間内に応答がありませんでした。',
+      );
     } on FormatException catch (error) {
-      throw PhotoLifecycleApiException(
+      throw BuildingLifecycleApiException(
         'Apps Scriptの応答を読み取れませんでした。${error.message}',
       );
     } on http.ClientException {
-      throw const PhotoLifecycleApiException(
+      throw const BuildingLifecycleApiException(
         'Apps Scriptへ接続できませんでした。ブラウザまたは社内ネットワークの制限を確認してください。',
       );
     }
@@ -262,8 +293,8 @@ class HttpPhotoLifecycleApiService implements PhotoLifecycleApiService {
   }
 }
 
-class PhotoLifecycleApiException implements Exception {
-  const PhotoLifecycleApiException(
+class BuildingLifecycleApiException implements Exception {
+  const BuildingLifecycleApiException(
     this.message, {
     this.statusCode,
     this.errorCode,
@@ -275,4 +306,14 @@ class PhotoLifecycleApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+int _requiredInt(Object? value, String fieldName) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  throw FormatException('$fieldNameが数値ではありません。');
 }

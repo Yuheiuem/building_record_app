@@ -20,6 +20,7 @@ import '../../../data/services/bootstrap_api_service.dart';
 import '../../../data/services/building_cover_photo_api_service.dart';
 import '../../../data/services/building_detail_api_service.dart';
 import '../../../data/services/building_information_api_service.dart';
+import '../../../data/services/building_lifecycle_api_service.dart';
 import '../../../data/services/building_location_api_service.dart';
 import '../../../data/services/photo_lifecycle_api_service.dart';
 import '../../../data/services/visit_information_api_service.dart';
@@ -37,6 +38,7 @@ class BuildingDetailPage extends StatefulWidget {
     this.buildingInformationApiService,
     this.visitInformationApiService,
     this.photoLifecycleApiService,
+    this.buildingLifecycleApiService,
     this.enableNetworkTiles = true,
     super.key,
   });
@@ -50,6 +52,7 @@ class BuildingDetailPage extends StatefulWidget {
   final BuildingInformationApiService? buildingInformationApiService;
   final VisitInformationApiService? visitInformationApiService;
   final PhotoLifecycleApiService? photoLifecycleApiService;
+  final BuildingLifecycleApiService? buildingLifecycleApiService;
   final bool enableNetworkTiles;
 
   @override
@@ -73,6 +76,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
   late final bool _ownsVisitInformationApiService;
   late final PhotoLifecycleApiService _photoLifecycleApiService;
   late final bool _ownsPhotoLifecycleApiService;
+  late final BuildingLifecycleApiService _buildingLifecycleApiService;
+  late final bool _ownsBuildingLifecycleApiService;
 
   final Map<String, Future<BuildingPhotoData>> _thumbnailFutures =
       <String, Future<BuildingPhotoData>>{};
@@ -113,6 +118,10 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     _ownsPhotoLifecycleApiService = widget.photoLifecycleApiService == null;
     _photoLifecycleApiService =
         widget.photoLifecycleApiService ?? HttpPhotoLifecycleApiService();
+    _ownsBuildingLifecycleApiService =
+        widget.buildingLifecycleApiService == null;
+    _buildingLifecycleApiService =
+        widget.buildingLifecycleApiService ?? HttpBuildingLifecycleApiService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadDetail();
@@ -155,6 +164,9 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     }
     if (_ownsPhotoLifecycleApiService) {
       _photoLifecycleApiService.close();
+    }
+    if (_ownsBuildingLifecycleApiService) {
+      _buildingLifecycleApiService.close();
     }
     super.dispose();
   }
@@ -802,6 +814,166 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
     await _loadDetail();
   }
 
+  Future<void> _hideBuilding() async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final bool confirmed = await _confirmHideBuilding(
+      context,
+      detail.building,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _buildingLifecycleApiService.hideBuilding(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      context.go(AppRoutes.browse);
+    } on BuildingLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '建物を非表示にできませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
+  Future<void> _deleteBuildingPermanently() async {
+    final BuildingDetailData? detail = _detail;
+    if (detail == null || _isLoading) {
+      return;
+    }
+
+    final String? idToken = widget.authService.idToken;
+    if (idToken == null || idToken.isEmpty) {
+      setState(() {
+        _errorMessage = 'Googleログイン情報を取得できませんでした。もう一度ログインしてください。';
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    late final BuildingLifecycleSummary preview;
+    try {
+      preview = await _buildingLifecycleApiService.getBuildingDeletionPreview(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+      );
+    } on BuildingLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '削除対象を確認できませんでした。もう一度お試しください。';
+      });
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isLoading = false;
+    });
+
+    final bool confirmed = await _confirmPermanentBuildingDeletion(
+      context,
+      preview,
+    );
+    if (!mounted || !confirmed) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await _buildingLifecycleApiService.deleteBuildingPermanently(
+        requestId: const Uuid().v4(),
+        clientVersion: AppConfig.version,
+        idToken: idToken,
+        buildingId: detail.building.buildingId,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+      });
+      context.go(AppRoutes.browse);
+    } on BuildingLifecycleApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error.message;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoading = false;
+        _errorMessage = '建物を完全削除できませんでした。もう一度お試しください。';
+      });
+    }
+  }
+
   Future<void> _editBuildingLocation() async {
     final BuildingDetailData? detail = _detail;
     if (detail == null || _isLoading) {
@@ -936,6 +1108,8 @@ class _BuildingDetailPageState extends State<BuildingDetailPage> {
                     onRefresh: _loadDetail,
                     onEditInformation: _editBuildingInformation,
                     onEditLocation: _editBuildingLocation,
+                    onHideBuilding: _hideBuilding,
+                    onDeleteBuildingPermanently: _deleteBuildingPermanently,
                     onRecordRevisit: () {
                       unawaited(
                         context.push<void>(
@@ -1010,6 +1184,8 @@ class _BuildingOverviewSection extends StatelessWidget {
     required this.onRefresh,
     required this.onEditInformation,
     required this.onEditLocation,
+    required this.onHideBuilding,
+    required this.onDeleteBuildingPermanently,
     required this.onRecordRevisit,
   });
 
@@ -1019,6 +1195,8 @@ class _BuildingOverviewSection extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final VoidCallback onEditInformation;
   final VoidCallback onEditLocation;
+  final VoidCallback onHideBuilding;
+  final VoidCallback onDeleteBuildingPermanently;
   final VoidCallback onRecordRevisit;
 
   @override
@@ -1034,6 +1212,8 @@ class _BuildingOverviewSection extends StatelessWidget {
           onRefresh: onRefresh,
           onEditInformation: onEditInformation,
           onEditLocation: onEditLocation,
+          onHideBuilding: onHideBuilding,
+          onDeleteBuildingPermanently: onDeleteBuildingPermanently,
           onRecordRevisit: onRecordRevisit,
         );
         final Widget map = _BuildingLocationCard(
@@ -1072,6 +1252,8 @@ class _BuildingInformationCard extends StatelessWidget {
     required this.onRefresh,
     required this.onEditInformation,
     required this.onEditLocation,
+    required this.onHideBuilding,
+    required this.onDeleteBuildingPermanently,
     required this.onRecordRevisit,
   });
 
@@ -1080,6 +1262,8 @@ class _BuildingInformationCard extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final VoidCallback onEditInformation;
   final VoidCallback onEditLocation;
+  final VoidCallback onHideBuilding;
+  final VoidCallback onDeleteBuildingPermanently;
   final VoidCallback onRecordRevisit;
 
   @override
@@ -1184,6 +1368,32 @@ class _BuildingInformationCard extends StatelessWidget {
               onPressed: onRecordRevisit,
               icon: const Icon(Icons.add_location_alt_outlined),
               label: const Text('再訪を記録'),
+            ),
+            const SizedBox(height: 18),
+            const Divider(),
+            const SizedBox(height: 8),
+            Text(
+              'その他の操作',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              key: const Key('hide-building'),
+              onPressed: onHideBuilding,
+              icon: const Icon(Icons.visibility_off_outlined),
+              label: const Text('建物を非表示にする'),
+            ),
+            const SizedBox(height: 6),
+            TextButton.icon(
+              key: const Key('delete-building-permanently'),
+              onPressed: onDeleteBuildingPermanently,
+              icon: const Icon(Icons.delete_forever),
+              label: const Text('建物を完全に削除'),
+              style: TextButton.styleFrom(
+                foregroundColor: colorScheme.error,
+              ),
             ),
           ],
         ),
@@ -2081,6 +2291,74 @@ class _FullPhotoDialogState extends State<_FullPhotoDialog> {
       ),
     );
   }
+}
+
+Future<bool> _confirmHideBuilding(
+  BuildContext context,
+  Building building,
+) async {
+  final bool? result = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: const Text('建物を非表示にしますか？'),
+        content: Text(
+          '「${building.buildingName}」を通常の地図・一覧から非表示にします。\n\n'
+          '訪問記録と写真、Google Driveのファイルは残るため、'
+          'ホームの「非表示建物を管理」から復元できます。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            key: const Key('confirm-hide-building'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('非表示にする'),
+          ),
+        ],
+      );
+    },
+  );
+  return result ?? false;
+}
+
+Future<bool> _confirmPermanentBuildingDeletion(
+  BuildContext context,
+  BuildingLifecycleSummary summary,
+) async {
+  final bool? result = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      return AlertDialog(
+        title: const Text('建物を完全に削除しますか？'),
+        content: Text(
+          '「${summary.building.buildingName}」を完全に削除します。\n\n'
+          '訪問 ${summary.visitCount}件\n'
+          '写真 ${summary.photoCount}枚\n'
+          '元画像容量 ${_formatBytes(summary.photoBytes)}\n\n'
+          'Google Driveの元画像とサムネイルも永久削除されます。'
+          'この操作は元に戻せません。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            key: const Key('confirm-delete-building-permanently'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            child: const Text('完全に削除'),
+          ),
+        ],
+      );
+    },
+  );
+  return result ?? false;
 }
 
 Future<bool> _confirmHidePhoto(

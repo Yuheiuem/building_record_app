@@ -14,9 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('通常写真を非表示にして非表示写真一覧へ移せる', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('通常写真を非表示にして非表示写真一覧へ移せる', (WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1000);
     addTearDown(tester.view.reset);
@@ -89,10 +87,7 @@ void main() {
     await tester.tap(manageButton);
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const Key('close-hidden-photo-manager')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const Key('close-hidden-photo-manager')), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('hidden-photo-photo-hidden-1')),
       findsOneWidget,
@@ -147,9 +142,7 @@ void main() {
 
     await tester.tap(
       find.byKey(
-        const ValueKey<String>(
-          'delete-photo-permanently-photo-active-2',
-        ),
+        const ValueKey<String>('delete-photo-permanently-photo-active-2'),
       ),
     );
     await tester.pumpAndSettle();
@@ -163,10 +156,7 @@ void main() {
     expect(lifecycleApiService.lastPhotoId, 'photo-active-2');
     expect(detailApiService.activePhotos.length, 1);
     expect(lifecycleApiService.hiddenPhotos, isEmpty);
-    expect(
-      find.text('写真をGoogle Driveから完全に削除しました。'),
-      findsOneWidget,
-    );
+    expect(find.text('写真をGoogle Driveから完全に削除しました。'), findsOneWidget);
     expect(
       find.byKey(const ValueKey<String>('building-photo-photo-active-2')),
       findsNothing,
@@ -217,7 +207,8 @@ class _FakeAuthService extends AuthService {
 
 class _FakeBuildingDetailApiService implements BuildingDetailApiService {
   _FakeBuildingDetailApiService({List<BuildingPhoto>? activePhotos})
-    : activePhotos = activePhotos ??
+    : activePhotos =
+          activePhotos ??
           <BuildingPhoto>[
             _photo('photo-active-1', 1),
             _photo('photo-active-2', 2),
