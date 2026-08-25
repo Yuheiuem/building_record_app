@@ -155,7 +155,7 @@ class _FakeBuildingLifecycleApiService implements BuildingLifecycleApiService {
   int deleteCallCount = 0;
   String? lastBuildingId;
 
-  BuildingLifecycleSummary get summary => BuildingLifecycleSummary(
+  BuildingLifecycleSummary get summary => const BuildingLifecycleSummary(
     building: const Building(
       buildingId: 'building-hidden-0001',
       buildingName: '非表示テスト建物',
