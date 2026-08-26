@@ -8,12 +8,15 @@ import '../../../core/config/app_config.dart';
 import '../../../core/routing/app_routes.dart';
 import '../../../data/services/auth_service.dart';
 import '../../../data/services/building_lifecycle_api_service.dart';
+import '../../../data/services/storage_monitor_api_service.dart';
 import '../../../shared/widgets/authenticated_app_bar.dart';
+import '../../../shared/widgets/storage_monitor_card.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({
     required this.authService,
     this.buildingLifecycleApiService,
+    this.storageMonitorApiService,
     super.key,
   });
 
@@ -21,6 +24,7 @@ class HomePage extends StatelessWidget {
 
   final AuthService authService;
   final BuildingLifecycleApiService? buildingLifecycleApiService;
+  final StorageMonitorApiService? storageMonitorApiService;
 
   Future<void> _openHiddenBuildingManager(BuildContext context) async {
     final String? idToken = authService.idToken;
@@ -86,6 +90,11 @@ class HomePage extends StatelessWidget {
                         const _CompactActionLayout()
                       else
                         const _WideActionLayout(),
+                      const SizedBox(height: 16),
+                      StorageMonitorCard(
+                        authService: authService,
+                        apiService: storageMonitorApiService,
+                      ),
                       const SizedBox(height: 16),
                       _HiddenBuildingsActionCard(
                         onTap: () => _openHiddenBuildingManager(context),

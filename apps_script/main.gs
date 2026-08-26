@@ -94,6 +94,12 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'getStorageUsage':
+        return handleGetStorageUsage(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'getHiddenBuildings':
         return handleGetHiddenBuildings(
           requestId,
@@ -251,7 +257,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '5-5.4',
+      stage: '5-5.5',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'

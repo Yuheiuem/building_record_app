@@ -1,154 +1,86 @@
-# 建築記録Webアプリ 段階5-4A.10 パッチ
+# 建築記録Webアプリ stage 5-5.5 容量監視・警告
 
-- 対象: 段階 5-4A.9 / v0.19.9 / 0.19.9+39
-- 更新後: **段階 5-4A.10 / v0.19.10 / 0.19.10+40**
-- パッチ名: `building_record_app_stage_5_4A_10_parallel_batches_patch.zip`
-- 目的: **2枚バッチを最大2本まで並行送信し、4枚以上の写真送信区間を短縮する**
+## バージョン
+- App: v0.20.5
+- Stage: 5-5.5
+- Build: 0.20.5+48
 
-## 1. 今回の変更
+## 今回の確定仕様
+容量監視は **HOMEと技術診断ページにのみ表示**します。
 
-v0.19.9では、2枚を1つの `uploadPhotosBatch` 通信へまとめるところまで実装済みです。
-ただしControllerが2枚ごとに完了待ちしていたため、4枚では2つのバッチが直列になっていました。
+- HOME: ページ表示時に自動取得 + 手動更新
+- 技術診断: ページ表示時に自動取得 + 手動更新
+- 記録画面、建物詳細などその他のページ: 表示なし
+- 保存完了後のポップアップ / SnackBar: なし
+- 写真保存処理への追加容量確認通信: なし
 
-v0.19.10ではControllerから最大4枚を同時に送信サービスへ渡します。
-送信サービス側は既存のキュー処理で次のように分けます。
+## 表示内容
+- Googleアカウントの総使用量 / 上限 / 残容量
+- Drive内使用量
+- Driveゴミ箱使用量
+- 本アプリが保持している元画像容量と枚数
+- 表示中写真枚数 / 非表示写真枚数
+- 使用率80%以上: 注意
+- 使用率90%以上: 危険
 
-```text
-Batch A: 写真1 + 写真2 ─┐
-                         ├ 最大2本並行
-Batch B: 写真3 + 写真4 ─┘
-```
+## 今回の構成変更
+容量表示UIを `StorageMonitorCard` として共通Widget化し、HOMEと技術診断の両方から使用します。
 
-- 1バッチ最大2枚は維持
-- 同時バッチ最大2本
-- 1枚登録の既存高速経路は維持
-- `requestId` / `photoId` の冪等性を維持
-- 成功済み写真は再送しない
-- 失敗写真だけ再送
-- サムネイルは従来どおり後送信
-- `beginRecord` / `finalizeRecord` は今回は変更しない
+ルートの `README.md` も今回から `overlay/README.md` に含め、実装段階に合わせて更新します。
 
-## 2. 変更ファイル
-
-今回は**すべて完全ファイル上書き方式**です。
-
-```text
-overlay/
-├─ lib/
-│  ├─ core/config/app_config.dart
-│  ├─ data/services/record_submission_api_service.dart
-│  └─ features/record/controllers/record_draft_controller.dart
-├─ test/data/services/record_submission_api_batch_service_test.dart
-└─ pubspec.yaml
-```
-
-以前の修正版にあった `git apply` / PowerShell補助スクリプトは使いません。
-
-## 3. 適用方法
-
-ZIPを展開し、**`overlay/` の中身だけ**を次へ上書きしてください。
-
-```text
-C:\flutter_projects\building_record_app
-```
-
-`README_FIRST.md` と `MANIFEST_SHA256.txt` はプロジェクトへコピーしません。
-
-## 4. 適用後確認
+## 適用方法
+ZIPを短い場所へ展開し、`overlay/` の**中身だけ**をプロジェクト直下へ上書きしてください。
 
 ```powershell
 cd C:\flutter_projects\building_record_app
-git status --short
-```
-
-主な変更対象:
-
-```text
-lib/core/config/app_config.dart
-lib/data/services/record_submission_api_service.dart
-lib/features/record/controllers/record_draft_controller.dart
-pubspec.yaml
-test/data/services/record_submission_api_batch_service_test.dart
-```
-
-## 5. 検証
-
-まず専用テスト:
-
-```powershell
-flutter test test/data/services/record_submission_api_batch_service_test.dart
-```
-
-通ったら全体確認:
-
-```powershell
 flutter pub get
 dart format .
 flutter analyze
+flutter test test/features/home/presentation/home_storage_monitor_test.dart
+flutter test test/features/diagnostics/presentation/diagnostics_storage_monitor_test.dart
 flutter test
 flutter build web
 ```
 
-成功条件:
+## Apps Script
+Flutter側の確認後、Apps Scriptへ以下を反映してください。
 
-```text
-No issues found!
-All tests passed!
-Built build\web
-```
+- `apps_script/main.gs` -> 既存ファイルを全置換
+- `apps_script/storage_monitor.gs` -> 新規作成して全貼り付け
 
-失敗した状態ではpushしません。
+その後、Webアプリを**新バージョンで再デプロイ**してください。
 
-## 6. Apps Script
+### Drive API
+既存の Advanced Drive Service をそのまま使います。
 
-**今回の5-4A.10追加変更ではApps Script変更なし / 再デプロイ不要です。**
+- Drive API
+- v3
+- ID: `Drive`
 
-v0.19.9で反映済みの `uploadPhotosBatch` をそのまま使います。
+新しいDrive APIサービスの追加やID変更は不要です。
 
-実行しないもの:
+### Spreadsheet
+シート構造の変更はありません。
+`setupDataSpreadsheet()` は実行しないでください。
 
-```text
-setupDataSpreadsheet()
-```
+## 実機確認
+1. HOMEを開くと容量情報が自動取得される。
+2. HOMEの更新ボタンで再取得できる。
+3. 技術診断を開くと容量情報が自動取得される。
+4. 技術診断の更新ボタンで再取得できる。
+5. その他のページに容量表示が出ない。
+6. 記録保存完了時に容量ポップアップが出ない。
+7. 80% / 90%の警告表示が想定どおりである。
 
-`SPREADSHEET_ID`にも触りません。
-
-## 7. GitHub反映
-
-全テスト成功後:
-
-```powershell
-git status --short
-git add pubspec.yaml lib/core/config/app_config.dart lib/data/services/record_submission_api_service.dart lib/features/record/controllers/record_draft_controller.dart test/data/services/record_submission_api_batch_service_test.dart
-git commit -m "Parallelize photo batch uploads v0.19.10"
-git push origin main
-```
-
-GitHub Actions成功後、公開版を確認します。
-
-## 8. 公開版の確認
-
-まず400KB前後の写真4枚程度で確認してください。
-
-確認項目:
-
-1. 画面版が `v0.19.10`
-2. 4/4枚すべて保存成功
-3. Driveに各写真が1個ずつ保存
-4. Photosシートに重複行なし
-5. 建物詳細から4枚とも表示できる
-6. 写真1+2と写真3+4がそれぞれ同じ「通信全体」時間になる
-7. 2つのバッチが並行し、写真送信区間が前回の直列合計より短くなるか確認
-
-Google側負荷で時間は変動するため、特定秒数は成功条件にしません。
-
-## 9. 今回触らないもの
-
-- `beginRecord`
-- `finalizeRecord`統合
-- Apps Script保存ロジック
-- 写真圧縮設定
-- サムネイル後送信
-- 再送冪等性
-
-4枚テストで安定性と効果を確認してから、次段階で `finalizeRecord` 独立通信削減を判断します。
+## 変更ファイル
+- `README.md`
+- `apps_script/main.gs`
+- `apps_script/storage_monitor.gs` (new)
+- `lib/core/config/app_config.dart`
+- `lib/data/services/storage_monitor_api_service.dart` (new)
+- `lib/shared/widgets/storage_monitor_card.dart` (new)
+- `lib/features/home/presentation/home_page.dart`
+- `lib/features/diagnostics/presentation/diagnostics_page.dart`
+- `pubspec.yaml`
+- `test/features/home/presentation/home_storage_monitor_test.dart` (new)
+- `test/features/diagnostics/presentation/diagnostics_storage_monitor_test.dart` (new)
