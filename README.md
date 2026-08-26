@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.2**、アプリバージョンは **v0.20.8** です。
+現在の実装段階は **段階 5-6.3A**、アプリバージョンは **v0.20.9** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -146,6 +146,8 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
   - `shared/`: 認証案内、共通メッセージ、表示用フォーマッタ
   - `record_page.dart` はService/Controller保持、画面全体の組み立て、Dialog・画面遷移を担当
 - **5-6.3**: `record_draft_controller.dart` の内部責務整理
+  - **5-6.3A**: 保存・再送・認証復旧の回帰テスト追加（実施済み）
+  - **5-6.3B**: Controller外部APIを維持した内部責務分割（次工程）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -200,5 +202,23 @@ lib/features/record/presentation/
    ├─ record_common_widgets.dart
    └─ record_formatters.dart
 ```
+
+### RecordDraftController回帰テスト（5-6.3A）
+
+`record_draft_controller.dart` の内部責務分割に入る前に、既存挙動を固定する回帰テストを追加しています。Controller本体、写真送信Service、Apps Script、API仕様は変更していません。
+
+追加した主な確認項目:
+
+- 下書き不備時にAPIを呼ばないこと
+- 写真1枚の一括保存経路を維持すること
+- 準備・写真・確定の各失敗後も同じrequestIdで再送すること
+- 成功済み写真を再送せず、失敗写真だけ再送すること
+- 送信開始後は下書きを変更できないこと
+- 写真5枚では4件のwaveと残り1件に分けること
+- 保存前のIDトークン更新と、送信中のAUTH_REQUIREDから復旧できること
+- 既存建物では今回追加するタグだけを送ること
+- 保存完了後に新しい記録を始めると送信セッションを初期化すること
+
+次工程の5-6.3Bでは、この回帰テストを維持したままController内部を小さく分割します。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
