@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.0**、アプリバージョンは **v0.20.6** です。
+現在の実装段階は **段階 5-6.1**、アプリバージョンは **v0.20.7** です。
 
 ## 現在できること
 
@@ -139,17 +139,47 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
 予定:
 
 - **5-6.0**: CI・文書・テスト配置の整理とリファクタリング前の安全網強化
-- **5-6.1**: `building_detail/presentation` の責務分割
-  - `building/`
-  - `photo/`
-  - `visit/`
-  - `shared/`
-  - `building_detail_page.dart` は全体を束ねるページとして `presentation/` 直下に残す
+- **5-6.1**: `building_detail/presentation` の責務分割（実施済み）
+  - `building/`: 建物概要・建物情報編集・代表位置など
+  - `photo/`: 写真ギャラリー・写真表示・非表示写真管理など
+  - `visit/`: 訪問履歴・訪問編集・非表示Visit管理など
+  - `shared/`: 共通表示・日時/容量表記・非同期リクエスト制御など
+  - `building_detail_page.dart` はデータ取得と各機能を束ねるページとして `presentation/` 直下に維持
 - **5-6.2**: `record_page.dart` のUI分割
 - **5-6.3**: `record_draft_controller.dart` の内部責務整理
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
+
+### Building Detail presentation構成（5-6.1）
+
+`building_detail_page.dart` は建物詳細全体のデータ取得・Service保持・画面遷移と各操作の調整を担当し、表示Widgetは同一Dart libraryの `part` ファイルへ分離しています。privateなWidget名や既存Keyを変更せず、挙動を維持したまま物理分割しています。
+
+```text
+lib/features/building_detail/presentation/
+├─ building_detail_page.dart
+├─ building/
+│  ├─ building_overview_section.dart
+│  ├─ building_information_card.dart
+│  ├─ building_information_edit_dialog.dart
+│  └─ building_location_card.dart
+├─ photo/
+│  ├─ photo_gallery_section.dart
+│  ├─ photo_tile.dart
+│  ├─ full_photo_dialog.dart
+│  ├─ hidden_photo_manager_dialog.dart
+│  └─ hidden_photo_preview_dialog.dart
+├─ visit/
+│  ├─ visit_history_section.dart
+│  ├─ visit_card.dart
+│  ├─ visit_information_edit_dialog.dart
+│  └─ hidden_visit_manager_dialog.dart
+└─ shared/
+   ├─ building_detail_common_widgets.dart
+   ├─ building_detail_formatters.dart
+   └─ async_request_limiter.dart
+```
+
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
