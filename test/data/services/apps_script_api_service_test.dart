@@ -9,10 +9,8 @@ import 'package:http/testing.dart';
 void main() {
   test('healthCheckでIDトークンをApps Scriptへ送信する', () async {
     late Map<String, dynamic> sentBody;
-
     final MockClient client = MockClient((http.Request request) async {
       sentBody = jsonDecode(request.body) as Map<String, dynamic>;
-
       final String responseBody = jsonEncode(<String, dynamic>{
         'ok': true,
         'requestId': 'request-123',
@@ -27,7 +25,6 @@ void main() {
         'errorCode': null,
         'message': null,
       });
-
       return http.Response.bytes(
         utf8.encode(responseBody),
         200,
@@ -41,7 +38,6 @@ void main() {
       client: client,
       endpoint: Uri.parse('https://example.com/exec'),
     );
-
     final HealthCheckResponse response = await service.healthCheck(
       requestId: 'request-123',
       clientVersion: 'v0.4.0',
@@ -67,7 +63,6 @@ void main() {
         'errorCode': 'FORBIDDEN',
         'message': 'このGoogleアカウントにはアクセス権限がありません。',
       });
-
       return http.Response.bytes(
         utf8.encode(responseBody),
         200,
@@ -81,7 +76,6 @@ void main() {
       client: client,
       endpoint: Uri.parse('https://example.com/exec'),
     );
-
     await expectLater(
       service.healthCheck(
         requestId: 'request-123',
@@ -102,7 +96,6 @@ void main() {
             ),
       ),
     );
-
     service.close();
   });
 }

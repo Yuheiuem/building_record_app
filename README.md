@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-5.5**、アプリバージョンは **v0.20.5** です。
+現在の実装段階は **段階 5-6.0**、アプリバージョンは **v0.20.6** です。
 
 ## 現在できること
 
@@ -43,8 +43,10 @@
 
 ## 開発環境
 
-- Flutter stable 3.44系
-- Dart 3.12系
+段階5-6.0から、ローカル開発環境とGitHub ActionsでFlutterバージョンを固定します。
+
+- Flutter **3.44.4** stable
+- Dart **3.12.2**
 - Windows + VS Code
 - Microsoft Edge
 
@@ -57,6 +59,20 @@ flutter analyze
 flutter test
 flutter build web
 ```
+
+## CI / GitHub Pages
+
+`main` へのpush後、GitHub Actionsで以下を順に実行します。
+
+1. Flutter 3.44.4をセットアップ
+2. `flutter pub get`
+3. `dart format --output=none --set-exit-if-changed lib test`
+4. `flutter analyze`
+5. `flutter test`
+6. `flutter build web --release --base-href "/building_record_app/"`
+7. GitHub Pagesへデプロイ
+
+Flutter stableの更新によって、アプリ側を変更していないのにCI結果だけ変化することを避けるため、CIではFlutter 3.44.4を明示しています。
 
 ## デプロイ
 
@@ -116,6 +132,24 @@ Apps Scriptでは既存の Advanced Drive Service を使用します。
 
 Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開エンドポイントですが、実データへのアクセス可否は認証とApps Script側の設定で制御します。
 
-## 今後
+## リファクタリング方針（段階5-6）
 
-容量監視までの実装完了後、プロジェクト全体のコードレビューを行い、長大化したFlutter / Apps Scriptファイルの責務分割と整理を行う予定です。その後、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
+容量監視までの機能追加を一区切りとし、段階5-6では**既存機能の挙動を変えずに責務分割と保守性改善**を行います。
+
+予定:
+
+- **5-6.0**: CI・文書・テスト配置の整理とリファクタリング前の安全網強化
+- **5-6.1**: `building_detail/presentation` の責務分割
+  - `building/`
+  - `photo/`
+  - `visit/`
+  - `shared/`
+  - `building_detail_page.dart` は全体を束ねるページとして `presentation/` 直下に残す
+- **5-6.2**: `record_page.dart` のUI分割
+- **5-6.3**: `record_draft_controller.dart` の内部責務整理
+- **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
+- **5-6.5**: Flutter側のApps Script HTTP共通処理整理
+
+段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
+
+整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
