@@ -124,6 +124,30 @@ function doPost(e) {
           request.payload,
           authContext
         );
+      case 'getHiddenBuildingVisits':
+        return handleGetHiddenBuildingVisits(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'hideVisit':
+        return handleHideVisit(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'restoreVisit':
+        return handleRestoreVisit(
+          requestId,
+          request.payload,
+          authContext
+        );
+      case 'deleteVisitPermanently':
+        return handleDeleteVisitPermanently(
+          requestId,
+          request.payload,
+          authContext
+        );
       case 'getCoverPhotoThumbnails':
         return handleGetCoverPhotoThumbnails(
           requestId,
@@ -227,7 +251,7 @@ function handleHealthCheck(requestId, authContext) {
     requestId,
     {
       status: 'ok',
-      stage: '5-5.3',
+      stage: '5-5.4',
       method: 'POST',
       authenticated: true,
       validationMode: 'tokeninfo_spike'

@@ -119,10 +119,7 @@ void main() {
 
     expect(apiService.deleteCallCount, 1);
     expect(apiService.lastBuildingId, 'building-hidden-0001');
-    expect(
-      find.text('建物と写真をGoogle Driveから完全に削除しました。'),
-      findsWidgets,
-    );
+    expect(find.text('建物と写真をGoogle Driveから完全に削除しました。'), findsWidgets);
   });
 }
 
