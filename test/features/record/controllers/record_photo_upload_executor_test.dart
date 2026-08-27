@@ -154,8 +154,7 @@ RecordDraftPhoto _photo() {
   );
 }
 
-class _FakeRecordSubmissionApiService
-    implements RecordSubmissionApiService {
+class _FakeRecordSubmissionApiService implements RecordSubmissionApiService {
   _FakeRecordSubmissionApiService({
     this.result,
     this.apiError,

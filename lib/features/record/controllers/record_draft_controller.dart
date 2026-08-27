@@ -99,8 +99,7 @@ class RecordDraftController extends ChangeNotifier {
   String? _locationErrorMessage;
   String? _locationNoticeMessage;
 
-  final RecordSubmissionSession _submissionSession =
-      RecordSubmissionSession();
+  final RecordSubmissionSession _submissionSession = RecordSubmissionSession();
   int _draftRevision = 0;
 
   RecordSubmissionPhase get _submissionPhase => _submissionSession.phase;
@@ -164,7 +163,8 @@ class RecordDraftController extends ChangeNotifier {
       _submissionSession.lastPhotoUploadDuration;
   set _lastPhotoUploadDuration(Duration? value) =>
       _submissionSession.lastPhotoUploadDuration = value;
-  Duration? get _lastFinalizeDuration => _submissionSession.lastFinalizeDuration;
+  Duration? get _lastFinalizeDuration =>
+      _submissionSession.lastFinalizeDuration;
   set _lastFinalizeDuration(Duration? value) =>
       _submissionSession.lastFinalizeDuration = value;
   Duration? get _lastCombinedSaveDuration =>
@@ -235,15 +235,13 @@ class RecordDraftController extends ChangeNotifier {
   int get uploadedPhotoCount => _submissionSession.countPhotosWithStatus(
     RecordPhotoUploadStatus.uploaded,
   );
-  int get failedPhotoCount => _submissionSession.countPhotosWithStatus(
-    RecordPhotoUploadStatus.failed,
-  );
+  int get failedPhotoCount =>
+      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.failed);
   int get uploadingPhotoCount => _submissionSession.countPhotosWithStatus(
     RecordPhotoUploadStatus.uploading,
   );
-  int get pendingPhotoCount => _submissionSession.countPhotosWithStatus(
-    RecordPhotoUploadStatus.pending,
-  );
+  int get pendingPhotoCount =>
+      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.pending);
   double get submissionProgress =>
       _submissionSession.progressForPhotoCount(_photos.length);
 
@@ -802,8 +800,7 @@ class RecordDraftController extends ChangeNotifier {
           newConstructionTagIds: _selectedConstructionTagIds,
           pendingExistingDesignTagIds: _pendingExistingDesignTagIds,
           pendingExistingSalesTagIds: _pendingExistingSalesTagIds,
-          pendingExistingConstructionTagIds:
-              _pendingExistingConstructionTagIds,
+          pendingExistingConstructionTagIds: _pendingExistingConstructionTagIds,
           buildingId: _submissionBuildingId!,
           visitId: _submissionVisitId!,
           visitedAt: _submissionVisitedAt!,
