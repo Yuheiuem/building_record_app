@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.3D**、アプリバージョンは **v0.20.12** です。
+現在の実装段階は **段階 5-6.3E**、アプリバージョンは **v0.20.13** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -150,7 +150,8 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
   - **5-6.3B**: 入力検証・タグ整列・送信用draft生成を純粋クラスへ分離（実施済み）
   - **5-6.3C**: requestId・保存先ID・写真状態・結果・計測値を送信セッションへ分離（実施済み）
   - **5-6.3D**: 複数写真の1枚分送信と結果反映を専用クラス・送信セッションへ分離（実施済み）
-  - **5-6.3E**: begin・4件wave・finalizeの送信調整処理を段階的に分離（次工程）
+  - **5-6.3E**: 写真1枚の準備・保存・確定をまとめた1通信経路を専用クラスへ分離（実施済み）
+  - **5-6.3F**: begin・4件wave・finalizeの複数写真送信調整処理を分離（次工程）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -222,7 +223,7 @@ lib/features/record/presentation/
 - 既存建物では今回追加するタグだけを送ること
 - 保存完了後に新しい記録を始めると送信セッションを初期化すること
 
-5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。5-6.3Dでは、複数写真の1枚分のAPI呼び出しと例外変換を `RecordPhotoUploadExecutor` へ、成功結果の状態反映を `RecordSubmissionSession` へ移しました。次工程の5-6.3Eでは、begin・4件wave・finalizeの順序を維持したまま送信調整処理の境界を整理します。
+5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。5-6.3Dでは、複数写真の1枚分のAPI呼び出しと例外変換を `RecordPhotoUploadExecutor` へ、成功結果の状態反映を `RecordSubmissionSession` へ移しました。5-6.3Eでは、写真1枚の準備・保存・確定をまとめる1通信経路を `RecordSinglePhotoSubmissionExecutor` へ分離しました。次工程の5-6.3Fでは、begin・4件wave・finalizeの順序を維持したまま複数写真の送信調整処理を分離します。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
 
@@ -313,6 +314,42 @@ lib/features/record/controllers/
 - 同じ写真requestIdでの手動再送
 - 成功済み写真を除外し、失敗写真だけを再送
 - 写真1枚の一括保存経路
+- Service側の2枚バッチ・最大2バッチ並行・700ms遅延
+- Apps Script、Sheets / Drive、API payload
+
+### 写真1枚の一括保存経路の分離（5-6.3E）
+
+写真1枚の場合にだけ使う、建物・訪問の準備、写真保存、記録確定を1回の `uploadPhoto` 通信へまとめる経路を `RecordSinglePhotoSubmissionExecutor` へ分離しました。Controllerは送信phase、画面メッセージ、写真状態、requestIdの保持、認証更新要求、処理時間計測を引き続き担当します。
+
+```text
+lib/features/record/controllers/
+├─ record_draft_controller.dart
+├─ record_submission_session.dart
+├─ record_photo_upload_executor.dart
+└─ record_single_photo_submission_executor.dart
+```
+
+専用クラスが担当する処理:
+
+- `recordPreparation` を付ける初回送信と、付けない再送の切替
+- `finalizeAfterUpload = true` を維持した写真1枚の1通信保存
+- `UploadRecordPhotoResult` から `BeginRecordResult` / `FinalizeRecordResult` を組み立てる処理
+- `AUTH_REQUIRED` と予期しない例外をControllerへ返す失敗結果への変換
+
+追加テスト:
+
+- 初回は準備payloadと確定指定を付けること
+- 再送時は準備payloadを付けず、同じ写真保存経路を使うこと
+- サーバーが未確定を返した場合に確定結果を作らないこと
+- `AUTH_REQUIRED` と予期しない例外を従来どおり扱うこと
+
+維持している挙動:
+
+- 写真1枚は1回のHTTP通信で保存すること
+- 同じ写真requestIdとbegin requestIdを再送時にも維持すること
+- 成功写真、buildingId / visitId、保存完了結果を送信セッションへ反映すること
+- 認証期限切れ時に入力内容を保持すること
+- 複数写真のbegin → 4件wave → finalize経路
 - Service側の2枚バッチ・最大2バッチ並行・700ms遅延
 - Apps Script、Sheets / Drive、API payload
 

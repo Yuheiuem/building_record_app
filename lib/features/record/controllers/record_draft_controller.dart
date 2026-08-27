@@ -20,6 +20,7 @@ import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
 import '../domain/record_submission_draft_builder.dart';
 import 'record_photo_upload_executor.dart';
+import 'record_single_photo_submission_executor.dart';
 
 part 'record_submission_session.dart';
 
@@ -52,6 +53,9 @@ class RecordDraftController extends ChangeNotifier {
        _recordSubmissionApiService = recordSubmissionApiService,
        _photoUploadExecutor = RecordPhotoUploadExecutor(
          recordSubmissionApiService: recordSubmissionApiService,
+       ),
+       _singlePhotoSubmissionExecutor = RecordSinglePhotoSubmissionExecutor(
+         recordSubmissionApiService: recordSubmissionApiService,
        ) {
     _authService.addListener(_handleAuthServiceChanged);
   }
@@ -63,6 +67,7 @@ class RecordDraftController extends ChangeNotifier {
   final TagApiService _tagApiService;
   final RecordSubmissionApiService _recordSubmissionApiService;
   final RecordPhotoUploadExecutor _photoUploadExecutor;
+  final RecordSinglePhotoSubmissionExecutor _singlePhotoSubmissionExecutor;
 
   final List<RecordDraftPhoto> _photos = <RecordDraftPhoto>[];
   final List<Building> _buildings = <Building>[];
@@ -952,65 +957,41 @@ class RecordDraftController extends ChangeNotifier {
 
     final Stopwatch combinedSaveStopwatch = Stopwatch()..start();
     try {
-      final UploadRecordPhotoResult uploadResult =
-          await _recordSubmissionApiService.uploadPhoto(
+      final RecordSinglePhotoSubmissionAttempt attempt =
+          await _singlePhotoSubmissionExecutor.submit(
             requestId: _photoRequestIds[photo.photoId]!,
-            clientVersion: AppConfig.version,
+            beginRequestId: _beginRequestId!,
             idToken: idToken,
             buildingId: _submissionBuildingId!,
             visitId: _submissionVisitId!,
-            photoId: photo.photoId,
-            fileName: photo.fileName,
-            mimeType: photo.mimeType,
-            bytes: photo.bytes,
-            takenAt: submissionDraft.visitedAt,
-            latitude: submissionDraft.location.latitude,
-            longitude: submissionDraft.location.longitude,
-            accuracyM: submissionDraft.location.accuracyM,
-            locationSource: submissionDraft.location.source.apiValue,
-            displayOrder: 1,
-            recordPreparation: _beginRecordResult == null
-                ? submissionDraft.toRecordPreparationPayload(
-                    requestId: _beginRequestId!,
-                  )
-                : null,
-            finalizeAfterUpload: true,
+            submissionDraft: submissionDraft,
+            photo: photo,
+            includeRecordPreparation: _beginRecordResult == null,
           );
+
+      final UploadRecordPhotoResult? uploadResult = attempt.uploadResult;
+      if (uploadResult == null) {
+        _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
+        if (attempt.authenticationRequired) {
+          _markAuthenticationRequired(idToken);
+        }
+        notifyListeners();
+        return <String>[
+          '${photo.fileName}: ${attempt.errorMessage ?? '不明なエラー'}',
+        ];
+      }
 
       _submissionSession.applyPhotoUploadResult(
         photoId: photo.photoId,
         result: uploadResult,
       );
-      _beginRecordResult ??= BeginRecordResult(
-        buildingId: _submissionBuildingId!,
-        visitId: _submissionVisitId!,
-        expectedPhotoCount: 1,
-        buildingCreated: uploadResult.buildingCreated,
-        visitCreated: uploadResult.visitCreated,
-        reused: uploadResult.reused,
-      );
-      if (uploadResult.recordCompleted) {
-        _finalizeRecordResult = FinalizeRecordResult(
-          buildingId: _submissionBuildingId!,
-          visitId: _submissionVisitId!,
-          photoCount: uploadResult.photoCount ?? 1,
-          status: 'completed',
-          reused: uploadResult.reused,
-        );
+      _beginRecordResult ??= attempt.beginRecordResult;
+      final FinalizeRecordResult? finalizeResult = attempt.finalizeRecordResult;
+      if (finalizeResult != null) {
+        _finalizeRecordResult = finalizeResult;
       }
       notifyListeners();
       return const <String>[];
-    } on RecordSubmissionApiException catch (error) {
-      _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
-      if (_isAuthenticationRequired(error.errorCode)) {
-        _markAuthenticationRequired(idToken);
-      }
-      notifyListeners();
-      return <String>['${photo.fileName}: ${error.message}'];
-    } catch (_) {
-      _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.failed;
-      notifyListeners();
-      return <String>['${photo.fileName}: 不明なエラー'];
     } finally {
       combinedSaveStopwatch.stop();
       _lastCombinedSaveDuration = combinedSaveStopwatch.elapsed;
