@@ -60,6 +60,17 @@ class RecordSubmissionSession {
     return countPhotosWithStatus(RecordPhotoUploadStatus.uploaded) / photoCount;
   }
 
+  /// 保存成功した写真の結果を、再送に使うセッション状態へ反映する。
+  void applyPhotoUploadResult({
+    required String photoId,
+    required UploadRecordPhotoResult result,
+  }) {
+    buildingId = result.buildingId ?? buildingId;
+    visitId = result.visitId ?? visitId;
+    photoUploadResults[photoId] = result;
+    photoUploadStatuses[photoId] = RecordPhotoUploadStatus.uploaded;
+  }
+
   /// 保存完了後に新しい下書きを始めるため、送信関連の状態だけを初期化する。
   void reset() {
     phase = RecordSubmissionPhase.idle;

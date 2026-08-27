@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.3C**、アプリバージョンは **v0.20.11** です。
+現在の実装段階は **段階 5-6.3D**、アプリバージョンは **v0.20.12** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -149,7 +149,8 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
   - **5-6.3A**: 保存・再送・認証復旧の回帰テスト追加（実施済み）
   - **5-6.3B**: 入力検証・タグ整列・送信用draft生成を純粋クラスへ分離（実施済み）
   - **5-6.3C**: requestId・保存先ID・写真状態・結果・計測値を送信セッションへ分離（実施済み）
-  - **5-6.3D**: 送信調整処理の段階的分離（次工程）
+  - **5-6.3D**: 複数写真の1枚分送信と結果反映を専用クラス・送信セッションへ分離（実施済み）
+  - **5-6.3E**: begin・4件wave・finalizeの送信調整処理を段階的に分離（次工程）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -221,7 +222,7 @@ lib/features/record/presentation/
 - 既存建物では今回追加するタグだけを送ること
 - 保存完了後に新しい記録を始めると送信セッションを初期化すること
 
-5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。次工程の5-6.3Dでは、送信順序を変えずに送信調整処理の境界を整理します。
+5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。5-6.3Dでは、複数写真の1枚分のAPI呼び出しと例外変換を `RecordPhotoUploadExecutor` へ、成功結果の状態反映を `RecordSubmissionSession` へ移しました。次工程の5-6.3Eでは、begin・4件wave・finalizeの順序を維持したまま送信調整処理の境界を整理します。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
 
@@ -281,6 +282,37 @@ lib/features/record/controllers/
 - 成功写真を再送せず失敗写真だけ再送
 - 写真1枚の一括保存経路と複数写真の4件wave
 - 認証期限切れ時の下書き保持
+- Service側の2枚バッチ・最大2バッチ並行・700ms遅延
+- Apps Script、Sheets / Drive、API payload
+
+
+### 複数写真の1枚分送信と結果反映の分離（5-6.3D）
+
+複数写真の4件wave内で写真1枚ごとに行っていた、`uploadPhoto` の引数組み立て、API例外の失敗結果への変換を `RecordPhotoUploadExecutor` へ分離しました。waveの組み立て、`Future.wait`、失敗後の中断、認証更新要求、begin / finalizeの順序は引き続き `RecordDraftController` が担当します。
+
+```text
+lib/features/record/controllers/
+├─ record_draft_controller.dart
+├─ record_submission_session.dart
+└─ record_photo_upload_executor.dart
+```
+
+保存成功時のbuildingId / visitId、写真結果、uploaded状態への反映は、可変状態を保持する `RecordSubmissionSession.applyPhotoUploadResult()` へまとめました。写真1枚の一括保存経路と複数写真経路は同じ反映処理を利用します。
+
+追加テスト:
+
+- 写真1枚分のrequestId、IDトークン、building / visit ID、画像、位置、表示順が従来どおりServiceへ渡ること
+- `AUTH_REQUIRED` を認証更新が必要な失敗結果として返すこと
+- 予期しない例外を従来どおり「不明なエラー」として返すこと
+- 保存成功結果を送信セッションへ反映し、レスポンスにIDがない場合は既存IDを保持すること
+
+維持している挙動:
+
+- Controllerの公開API、表示メッセージ、進捗
+- begin → 4件wave → finalizeの順序
+- 同じ写真requestIdでの手動再送
+- 成功済み写真を除外し、失敗写真だけを再送
+- 写真1枚の一括保存経路
 - Service側の2枚バッチ・最大2バッチ並行・700ms遅延
 - Apps Script、Sheets / Drive、API payload
 

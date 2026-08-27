@@ -19,6 +19,7 @@ import '../../../data/services/record_location_service.dart';
 import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
 import '../domain/record_submission_draft_builder.dart';
+import 'record_photo_upload_executor.dart';
 
 part 'record_submission_session.dart';
 
@@ -48,7 +49,10 @@ class RecordDraftController extends ChangeNotifier {
        _authService = authService,
        _locationService = locationService,
        _tagApiService = tagApiService,
-       _recordSubmissionApiService = recordSubmissionApiService {
+       _recordSubmissionApiService = recordSubmissionApiService,
+       _photoUploadExecutor = RecordPhotoUploadExecutor(
+         recordSubmissionApiService: recordSubmissionApiService,
+       ) {
     _authService.addListener(_handleAuthServiceChanged);
   }
 
@@ -58,6 +62,7 @@ class RecordDraftController extends ChangeNotifier {
   final RecordLocationService _locationService;
   final TagApiService _tagApiService;
   final RecordSubmissionApiService _recordSubmissionApiService;
+  final RecordPhotoUploadExecutor _photoUploadExecutor;
 
   final List<RecordDraftPhoto> _photos = <RecordDraftPhoto>[];
   final List<Building> _buildings = <Building>[];
@@ -94,7 +99,8 @@ class RecordDraftController extends ChangeNotifier {
   String? _locationErrorMessage;
   String? _locationNoticeMessage;
 
-  final RecordSubmissionSession _submissionSession = RecordSubmissionSession();
+  final RecordSubmissionSession _submissionSession =
+      RecordSubmissionSession();
   int _draftRevision = 0;
 
   RecordSubmissionPhase get _submissionPhase => _submissionSession.phase;
@@ -146,8 +152,6 @@ class RecordDraftController extends ChangeNotifier {
       _submissionSession.photoRequestIds;
   Map<String, RecordPhotoUploadStatus> get _photoUploadStatuses =>
       _submissionSession.photoUploadStatuses;
-  Map<String, UploadRecordPhotoResult> get _photoUploadResults =>
-      _submissionSession.photoUploadResults;
   Duration? get _lastSubmissionDuration =>
       _submissionSession.lastSubmissionDuration;
   set _lastSubmissionDuration(Duration? value) =>
@@ -160,8 +164,7 @@ class RecordDraftController extends ChangeNotifier {
       _submissionSession.lastPhotoUploadDuration;
   set _lastPhotoUploadDuration(Duration? value) =>
       _submissionSession.lastPhotoUploadDuration = value;
-  Duration? get _lastFinalizeDuration =>
-      _submissionSession.lastFinalizeDuration;
+  Duration? get _lastFinalizeDuration => _submissionSession.lastFinalizeDuration;
   set _lastFinalizeDuration(Duration? value) =>
       _submissionSession.lastFinalizeDuration = value;
   Duration? get _lastCombinedSaveDuration =>
@@ -232,13 +235,15 @@ class RecordDraftController extends ChangeNotifier {
   int get uploadedPhotoCount => _submissionSession.countPhotosWithStatus(
     RecordPhotoUploadStatus.uploaded,
   );
-  int get failedPhotoCount =>
-      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.failed);
+  int get failedPhotoCount => _submissionSession.countPhotosWithStatus(
+    RecordPhotoUploadStatus.failed,
+  );
   int get uploadingPhotoCount => _submissionSession.countPhotosWithStatus(
     RecordPhotoUploadStatus.uploading,
   );
-  int get pendingPhotoCount =>
-      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.pending);
+  int get pendingPhotoCount => _submissionSession.countPhotosWithStatus(
+    RecordPhotoUploadStatus.pending,
+  );
   double get submissionProgress =>
       _submissionSession.progressForPhotoCount(_photos.length);
 
@@ -797,7 +802,8 @@ class RecordDraftController extends ChangeNotifier {
           newConstructionTagIds: _selectedConstructionTagIds,
           pendingExistingDesignTagIds: _pendingExistingDesignTagIds,
           pendingExistingSalesTagIds: _pendingExistingSalesTagIds,
-          pendingExistingConstructionTagIds: _pendingExistingConstructionTagIds,
+          pendingExistingConstructionTagIds:
+              _pendingExistingConstructionTagIds,
           buildingId: _submissionBuildingId!,
           visitId: _submissionVisitId!,
           visitedAt: _submissionVisitedAt!,
@@ -974,7 +980,10 @@ class RecordDraftController extends ChangeNotifier {
             finalizeAfterUpload: true,
           );
 
-      _applyUploadResult(photo, uploadResult);
+      _submissionSession.applyPhotoUploadResult(
+        photoId: photo.photoId,
+        result: uploadResult,
+      );
       _beginRecordResult ??= BeginRecordResult(
         buildingId: _submissionBuildingId!,
         visitId: _submissionVisitId!,
@@ -1084,10 +1093,13 @@ class RecordDraftController extends ChangeNotifier {
           }
           notifyListeners();
 
-          final List<_PhotoUploadAttempt> attempts = await Future.wait(
+          final List<RecordPhotoUploadAttempt> attempts = await Future.wait(
             wave.map((RecordDraftPhoto photo) {
-              return _uploadPhotoForMultipleRecord(
+              return _photoUploadExecutor.upload(
+                requestId: _photoRequestIds[photo.photoId]!,
                 idToken: idToken,
+                buildingId: _submissionBuildingId!,
+                visitId: _submissionVisitId!,
                 submissionDraft: submissionDraft,
                 photo: photo,
                 displayOrder: _photos.indexOf(photo) + 1,
@@ -1095,10 +1107,13 @@ class RecordDraftController extends ChangeNotifier {
             }),
           );
 
-          for (final _PhotoUploadAttempt attempt in attempts) {
+          for (final RecordPhotoUploadAttempt attempt in attempts) {
             final UploadRecordPhotoResult? result = attempt.result;
             if (result != null) {
-              _applyUploadResult(attempt.photo, result);
+              _submissionSession.applyPhotoUploadResult(
+                photoId: attempt.photo.photoId,
+                result: result,
+              );
               continue;
             }
 
@@ -1148,53 +1163,6 @@ class RecordDraftController extends ChangeNotifier {
     }
 
     return failedDetails;
-  }
-
-  Future<_PhotoUploadAttempt> _uploadPhotoForMultipleRecord({
-    required String idToken,
-    required RecordSubmissionDraft submissionDraft,
-    required RecordDraftPhoto photo,
-    required int displayOrder,
-  }) async {
-    try {
-      final UploadRecordPhotoResult result = await _recordSubmissionApiService
-          .uploadPhoto(
-            requestId: _photoRequestIds[photo.photoId]!,
-            clientVersion: AppConfig.version,
-            idToken: idToken,
-            buildingId: _submissionBuildingId!,
-            visitId: _submissionVisitId!,
-            photoId: photo.photoId,
-            fileName: photo.fileName,
-            mimeType: photo.mimeType,
-            bytes: photo.bytes,
-            takenAt: submissionDraft.visitedAt,
-            latitude: submissionDraft.location.latitude,
-            longitude: submissionDraft.location.longitude,
-            accuracyM: submissionDraft.location.accuracyM,
-            locationSource: submissionDraft.location.source.apiValue,
-            displayOrder: displayOrder,
-          );
-      return _PhotoUploadAttempt.success(photo, result);
-    } on RecordSubmissionApiException catch (error) {
-      return _PhotoUploadAttempt.failure(
-        photo,
-        error.message,
-        authenticationRequired: _isAuthenticationRequired(error.errorCode),
-      );
-    } catch (_) {
-      return _PhotoUploadAttempt.failure(photo, '不明なエラー');
-    }
-  }
-
-  void _applyUploadResult(
-    RecordDraftPhoto photo,
-    UploadRecordPhotoResult uploadResult,
-  ) {
-    _submissionBuildingId = uploadResult.buildingId ?? _submissionBuildingId;
-    _submissionVisitId = uploadResult.visitId ?? _submissionVisitId;
-    _photoUploadResults[photo.photoId] = uploadResult;
-    _photoUploadStatuses[photo.photoId] = RecordPhotoUploadStatus.uploaded;
   }
 
   Future<void> startNewRecord() async {
@@ -1445,43 +1413,4 @@ class RecordDraftController extends ChangeNotifier {
 
 String _normalizeSearchText(String value) {
   return value.trim().toLowerCase();
-}
-
-class _PhotoUploadAttempt {
-  const _PhotoUploadAttempt._({
-    required this.photo,
-    required this.result,
-    required this.errorMessage,
-    required this.authenticationRequired,
-  });
-
-  factory _PhotoUploadAttempt.success(
-    RecordDraftPhoto photo,
-    UploadRecordPhotoResult result,
-  ) {
-    return _PhotoUploadAttempt._(
-      photo: photo,
-      result: result,
-      errorMessage: null,
-      authenticationRequired: false,
-    );
-  }
-
-  factory _PhotoUploadAttempt.failure(
-    RecordDraftPhoto photo,
-    String errorMessage, {
-    bool authenticationRequired = false,
-  }) {
-    return _PhotoUploadAttempt._(
-      photo: photo,
-      result: null,
-      errorMessage: errorMessage,
-      authenticationRequired: authenticationRequired,
-    );
-  }
-
-  final RecordDraftPhoto photo;
-  final UploadRecordPhotoResult? result;
-  final String? errorMessage;
-  final bool authenticationRequired;
 }

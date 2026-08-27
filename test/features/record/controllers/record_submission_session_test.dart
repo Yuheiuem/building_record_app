@@ -27,11 +27,65 @@ void main() {
       'photo-pending': RecordPhotoUploadStatus.pending,
     });
 
-    expect(session.countPhotosWithStatus(RecordPhotoUploadStatus.uploaded), 1);
-    expect(session.countPhotosWithStatus(RecordPhotoUploadStatus.uploading), 1);
+    expect(
+      session.countPhotosWithStatus(RecordPhotoUploadStatus.uploaded),
+      1,
+    );
+    expect(
+      session.countPhotosWithStatus(RecordPhotoUploadStatus.uploading),
+      1,
+    );
     expect(session.countPhotosWithStatus(RecordPhotoUploadStatus.failed), 1);
     expect(session.countPhotosWithStatus(RecordPhotoUploadStatus.pending), 1);
     expect(session.progressForPhotoCount(4), 0.25);
+  });
+
+  test('写真送信結果を保存先ID・結果・uploaded状態へ反映する', () {
+    final RecordSubmissionSession session = RecordSubmissionSession()
+      ..buildingId = 'building-before'
+      ..visitId = 'visit-before';
+
+    const UploadRecordPhotoResult resultWithoutIds = UploadRecordPhotoResult(
+      photoId: 'photo-1',
+      storageFileId: 'storage-1',
+      byteSize: 100,
+      displayOrder: 1,
+      reused: false,
+    );
+    session.applyPhotoUploadResult(
+      photoId: 'photo-1',
+      result: resultWithoutIds,
+    );
+
+    expect(session.buildingId, 'building-before');
+    expect(session.visitId, 'visit-before');
+    expect(session.photoResult('photo-1'), same(resultWithoutIds));
+    expect(
+      session.photoStatus('photo-1'),
+      RecordPhotoUploadStatus.uploaded,
+    );
+
+    const UploadRecordPhotoResult resultWithIds = UploadRecordPhotoResult(
+      photoId: 'photo-2',
+      storageFileId: 'storage-2',
+      byteSize: 200,
+      displayOrder: 2,
+      reused: false,
+      buildingId: 'building-after',
+      visitId: 'visit-after',
+    );
+    session.applyPhotoUploadResult(
+      photoId: 'photo-2',
+      result: resultWithIds,
+    );
+
+    expect(session.buildingId, 'building-after');
+    expect(session.visitId, 'visit-after');
+    expect(session.photoResult('photo-2'), same(resultWithIds));
+    expect(
+      session.photoStatus('photo-2'),
+      RecordPhotoUploadStatus.uploaded,
+    );
   });
 
   test('begin開始後または送信中は下書きをロックする', () {
@@ -82,7 +136,8 @@ void main() {
       ..lastFinalizeDuration = const Duration(seconds: 3)
       ..lastCombinedSaveDuration = const Duration(seconds: 9);
     session.photoRequestIds['photo-1'] = 'photo-request';
-    session.photoUploadStatuses['photo-1'] = RecordPhotoUploadStatus.uploaded;
+    session.photoUploadStatuses['photo-1'] =
+        RecordPhotoUploadStatus.uploaded;
     session.photoUploadResults['photo-1'] = const UploadRecordPhotoResult(
       photoId: 'photo-1',
       storageFileId: 'storage-1',
