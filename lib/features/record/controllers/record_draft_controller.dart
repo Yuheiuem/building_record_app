@@ -18,6 +18,7 @@ import '../../../data/services/record_image_picker_service.dart';
 import '../../../data/services/record_location_service.dart';
 import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
+import '../domain/record_submission_draft_builder.dart';
 
 enum RecordBuildingMode { newBuilding, existingBuilding }
 
@@ -693,7 +694,14 @@ class RecordDraftController extends ChangeNotifier {
       return;
     }
 
-    final String? validationMessage = _validateRecordDraft();
+    final String? validationMessage = RecordSubmissionDraftBuilder.validate(
+      hasPhotos: _photos.isNotEmpty,
+      isNewBuilding: _buildingMode == RecordBuildingMode.newBuilding,
+      newBuildingName: _newBuildingName,
+      hasSelectedExistingBuilding: _selectedExistingBuilding != null,
+      hasVisitLocation: _visitLocation != null,
+      idToken: _authService.idToken,
+    );
     if (validationMessage != null) {
       _submissionPhase = RecordSubmissionPhase.idle;
       _submissionErrorMessage = validationMessage;
@@ -743,6 +751,25 @@ class RecordDraftController extends ChangeNotifier {
         : _selectedExistingBuilding!.buildingId;
     _submissionVisitedAt ??= DateTime.now();
 
+    final RecordSubmissionDraft submissionDraft =
+        RecordSubmissionDraftBuilder.build(
+          isNewBuilding: _buildingMode == RecordBuildingMode.newBuilding,
+          newBuildingName: _newBuildingName,
+          newDesignTagIds: _selectedDesignTagIds,
+          newSalesTagIds: _selectedSalesTagIds,
+          newConstructionTagIds: _selectedConstructionTagIds,
+          pendingExistingDesignTagIds: _pendingExistingDesignTagIds,
+          pendingExistingSalesTagIds: _pendingExistingSalesTagIds,
+          pendingExistingConstructionTagIds: _pendingExistingConstructionTagIds,
+          buildingId: _submissionBuildingId!,
+          visitId: _submissionVisitId!,
+          visitedAt: _submissionVisitedAt!,
+          triggerTagIds: _selectedTriggerTagIds,
+          impression: _impression,
+          location: location,
+          expectedPhotoCount: _photos.length,
+        );
+
     for (final RecordDraftPhoto photo in _photos) {
       _photoRequestIds.putIfAbsent(photo.photoId, uuid.v4);
       final RecordPhotoUploadStatus status = photoUploadStatus(photo.photoId);
@@ -763,8 +790,8 @@ class RecordDraftController extends ChangeNotifier {
 
     try {
       final List<String> failedDetails = _photos.length == 1
-          ? await _submitSinglePhotoRecord(idToken, location)
-          : await _submitMultiplePhotoRecord(idToken, location);
+          ? await _submitSinglePhotoRecord(idToken, submissionDraft)
+          : await _submitMultiplePhotoRecord(idToken, submissionDraft);
 
       _currentUploadingPhotoId = null;
       if (failedDetails.isNotEmpty) {
@@ -869,7 +896,7 @@ class RecordDraftController extends ChangeNotifier {
 
   Future<List<String>> _submitSinglePhotoRecord(
     String idToken,
-    RecordDraftLocation location,
+    RecordSubmissionDraft submissionDraft,
   ) async {
     final RecordDraftPhoto photo = _photos.single;
     if (photoUploadStatus(photo.photoId) == RecordPhotoUploadStatus.uploaded &&
@@ -896,14 +923,16 @@ class RecordDraftController extends ChangeNotifier {
             fileName: photo.fileName,
             mimeType: photo.mimeType,
             bytes: photo.bytes,
-            takenAt: _submissionVisitedAt!,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracyM: location.accuracyM,
-            locationSource: location.source.apiValue,
+            takenAt: submissionDraft.visitedAt,
+            latitude: submissionDraft.location.latitude,
+            longitude: submissionDraft.location.longitude,
+            accuracyM: submissionDraft.location.accuracyM,
+            locationSource: submissionDraft.location.source.apiValue,
             displayOrder: 1,
             recordPreparation: _beginRecordResult == null
-                ? _recordPreparationPayload(location)
+                ? submissionDraft.toRecordPreparationPayload(
+                    requestId: _beginRequestId!,
+                  )
                 : null,
             finalizeAfterUpload: true,
           );
@@ -947,7 +976,7 @@ class RecordDraftController extends ChangeNotifier {
 
   Future<List<String>> _submitMultiplePhotoRecord(
     String idToken,
-    RecordDraftLocation location,
+    RecordSubmissionDraft submissionDraft,
   ) async {
     if (_beginRecordResult == null) {
       _submissionPhase = RecordSubmissionPhase.starting;
@@ -961,29 +990,21 @@ class RecordDraftController extends ChangeNotifier {
               requestId: _beginRequestId!,
               clientVersion: AppConfig.version,
               idToken: idToken,
-              buildingMode: _buildingMode == RecordBuildingMode.newBuilding
-                  ? 'new'
-                  : 'existing',
-              buildingId: _submissionBuildingId!,
-              visitId: _submissionVisitId!,
-              buildingName: _buildingMode == RecordBuildingMode.newBuilding
-                  ? _newBuildingName.trim()
-                  : null,
-              designTagIds: _buildingTagIdsForSubmission(
-                BuildingTagType.design,
-              ),
-              salesTagIds: _buildingTagIdsForSubmission(BuildingTagType.sales),
-              constructionTagIds: _buildingTagIdsForSubmission(
-                BuildingTagType.construction,
-              ),
-              visitedAt: _submissionVisitedAt!,
-              triggerTagIds: _sortedIds(_selectedTriggerTagIds),
-              impression: _impression.trim(),
-              latitude: location.latitude,
-              longitude: location.longitude,
-              accuracyM: location.accuracyM,
-              locationSource: location.source.apiValue,
-              expectedPhotoCount: _photos.length,
+              buildingMode: submissionDraft.buildingMode,
+              buildingId: submissionDraft.buildingId,
+              visitId: submissionDraft.visitId,
+              buildingName: submissionDraft.buildingName,
+              designTagIds: submissionDraft.designTagIds,
+              salesTagIds: submissionDraft.salesTagIds,
+              constructionTagIds: submissionDraft.constructionTagIds,
+              visitedAt: submissionDraft.visitedAt,
+              triggerTagIds: submissionDraft.triggerTagIds,
+              impression: submissionDraft.impression,
+              latitude: submissionDraft.location.latitude,
+              longitude: submissionDraft.location.longitude,
+              accuracyM: submissionDraft.location.accuracyM,
+              locationSource: submissionDraft.location.source.apiValue,
+              expectedPhotoCount: submissionDraft.expectedPhotoCount,
             );
         _beginRecordResult = beginResult;
         _submissionBuildingId = beginResult.buildingId;
@@ -1030,7 +1051,7 @@ class RecordDraftController extends ChangeNotifier {
             wave.map((RecordDraftPhoto photo) {
               return _uploadPhotoForMultipleRecord(
                 idToken: idToken,
-                location: location,
+                submissionDraft: submissionDraft,
                 photo: photo,
                 displayOrder: _photos.indexOf(photo) + 1,
               );
@@ -1094,7 +1115,7 @@ class RecordDraftController extends ChangeNotifier {
 
   Future<_PhotoUploadAttempt> _uploadPhotoForMultipleRecord({
     required String idToken,
-    required RecordDraftLocation location,
+    required RecordSubmissionDraft submissionDraft,
     required RecordDraftPhoto photo,
     required int displayOrder,
   }) async {
@@ -1110,11 +1131,11 @@ class RecordDraftController extends ChangeNotifier {
             fileName: photo.fileName,
             mimeType: photo.mimeType,
             bytes: photo.bytes,
-            takenAt: _submissionVisitedAt!,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            accuracyM: location.accuracyM,
-            locationSource: location.source.apiValue,
+            takenAt: submissionDraft.visitedAt,
+            latitude: submissionDraft.location.latitude,
+            longitude: submissionDraft.location.longitude,
+            accuracyM: submissionDraft.location.accuracyM,
+            locationSource: submissionDraft.location.source.apiValue,
             displayOrder: displayOrder,
           );
       return _PhotoUploadAttempt.success(photo, result);
@@ -1127,35 +1148,6 @@ class RecordDraftController extends ChangeNotifier {
     } catch (_) {
       return _PhotoUploadAttempt.failure(photo, '不明なエラー');
     }
-  }
-
-  RecordPreparationPayload _recordPreparationPayload(
-    RecordDraftLocation location,
-  ) {
-    return RecordPreparationPayload(
-      requestId: _beginRequestId!,
-      buildingMode: _buildingMode == RecordBuildingMode.newBuilding
-          ? 'new'
-          : 'existing',
-      buildingId: _submissionBuildingId!,
-      visitId: _submissionVisitId!,
-      buildingName: _buildingMode == RecordBuildingMode.newBuilding
-          ? _newBuildingName.trim()
-          : null,
-      designTagIds: _buildingTagIdsForSubmission(BuildingTagType.design),
-      salesTagIds: _buildingTagIdsForSubmission(BuildingTagType.sales),
-      constructionTagIds: _buildingTagIdsForSubmission(
-        BuildingTagType.construction,
-      ),
-      visitedAt: _submissionVisitedAt!,
-      triggerTagIds: _sortedIds(_selectedTriggerTagIds),
-      impression: _impression.trim(),
-      latitude: location.latitude,
-      longitude: location.longitude,
-      accuracyM: location.accuracyM,
-      locationSource: location.source.apiValue,
-      expectedPhotoCount: _photos.length,
-    );
   }
 
   void _applyUploadResult(
@@ -1218,47 +1210,6 @@ class RecordDraftController extends ChangeNotifier {
     notifyListeners();
 
     await loadBootstrapData();
-  }
-
-  String? _validateRecordDraft() {
-    if (_photos.isEmpty) {
-      return '写真を1枚以上選択してください。';
-    }
-
-    if (_buildingMode == RecordBuildingMode.newBuilding) {
-      final String buildingName = _newBuildingName.trim();
-      if (buildingName.isEmpty) {
-        return '建物名を入力してください。';
-      }
-      if (buildingName.runes.length > 100) {
-        return '建物名は100文字以内で入力してください。';
-      }
-    } else if (_selectedExistingBuilding == null) {
-      return '登録済みの建物を選択してください。';
-    }
-
-    if (_visitLocation == null) {
-      return '位置情報を取得してください。';
-    }
-
-    final String? idToken = _authService.idToken;
-    if (idToken == null || idToken.isEmpty) {
-      return 'Googleログイン情報を取得できませんでした。';
-    }
-
-    return null;
-  }
-
-  List<String> _buildingTagIdsForSubmission(BuildingTagType type) {
-    final Set<String> ids = _buildingMode == RecordBuildingMode.newBuilding
-        ? _tagIdsFor(type)
-        : _pendingExistingTagIdsFor(type);
-    return _sortedIds(ids);
-  }
-
-  List<String> _sortedIds(Set<String> ids) {
-    final List<String> result = ids.toList()..sort();
-    return List<String>.unmodifiable(result);
   }
 
   Future<void> acquireCurrentLocation() async {

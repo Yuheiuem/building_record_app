@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.3A**、アプリバージョンは **v0.20.9** です。
+現在の実装段階は **段階 5-6.3B**、アプリバージョンは **v0.20.10** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -147,7 +147,8 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
   - `record_page.dart` はService/Controller保持、画面全体の組み立て、Dialog・画面遷移を担当
 - **5-6.3**: `record_draft_controller.dart` の内部責務整理
   - **5-6.3A**: 保存・再送・認証復旧の回帰テスト追加（実施済み）
-  - **5-6.3B**: Controller外部APIを維持した内部責務分割（次工程）
+  - **5-6.3B**: 入力検証・タグ整列・送信用draft生成を純粋クラスへ分離（実施済み）
+  - **5-6.3C**: 送信セッション状態と送信調整処理の段階的分離（次工程）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -219,6 +220,33 @@ lib/features/record/presentation/
 - 既存建物では今回追加するタグだけを送ること
 - 保存完了後に新しい記録を始めると送信セッションを初期化すること
 
-次工程の5-6.3Bでは、この回帰テストを維持したままController内部を小さく分割します。
+5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。次工程の5-6.3Cでは、送信セッション状態と送信調整処理をさらに小さな単位へ分けます。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
+
+### Record送信用draft生成の分離（5-6.3B）
+
+`RecordDraftController` が直接担当していた、入力検証、建物タグIDの選択・並べ替え、送信用文字列のtrim、1枚保存用 `RecordPreparationPayload` の組み立てを、状態を持たない純粋クラスへ分離しています。
+
+```text
+lib/features/record/
+├─ controllers/
+│  └─ record_draft_controller.dart
+└─ domain/
+   └─ record_submission_draft_builder.dart
+```
+
+`RecordSubmissionDraftBuilder` は同じ入力から常に同じ検証結果と `RecordSubmissionDraft` を作ります。`RecordSubmissionDraft` は送信開始時点の整形済み値を保持し、1枚保存と複数枚保存の両方から参照します。
+
+維持している挙動:
+
+- `RecordDraftController` の公開APIと保持状態
+- requestId / photoIdと再送時の冪等性
+- 成功写真を再送せず失敗写真だけ再送する処理
+- 1枚保存と複数枚保存の通信経路
+- 4写真単位のwave、Service側の2枚バッチ・並行数・遅延
+- 認証期限切れ時の下書き保持と再認証
+- Apps Script、API payloadのキーと値
+
+純粋クラスには、検証文言、タグIDの昇順化、新規/既存建物で送信対象タグを切り替える処理、`RecordPreparationPayload`変換の単体テストを追加しています。
+

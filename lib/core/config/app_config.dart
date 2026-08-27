@@ -1,7 +1,7 @@
 abstract final class AppConfig {
   static const String workingTitle = '建築記録Webアプリ';
-  static const String version = 'v0.20.9';
-  static const String stage = '段階 5-6.3A';
+  static const String version = 'v0.20.10';
+  static const String stage = '段階 5-6.3B';
   static const int driveSpikeMaxPhotoBytes = 2 * 1024 * 1024;
   // 正式な記録画面で選択する写真の初期設定。
   static const int recordImageMaxDimension = 1600;
