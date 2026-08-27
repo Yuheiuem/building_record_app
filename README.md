@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.3B**、アプリバージョンは **v0.20.10** です。
+現在の実装段階は **段階 5-6.3C**、アプリバージョンは **v0.20.11** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -148,7 +148,8 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
 - **5-6.3**: `record_draft_controller.dart` の内部責務整理
   - **5-6.3A**: 保存・再送・認証復旧の回帰テスト追加（実施済み）
   - **5-6.3B**: 入力検証・タグ整列・送信用draft生成を純粋クラスへ分離（実施済み）
-  - **5-6.3C**: 送信セッション状態と送信調整処理の段階的分離（次工程）
+  - **5-6.3C**: requestId・保存先ID・写真状態・結果・計測値を送信セッションへ分離（実施済み）
+  - **5-6.3D**: 送信調整処理の段階的分離（次工程）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -220,7 +221,7 @@ lib/features/record/presentation/
 - 既存建物では今回追加するタグだけを送ること
 - 保存完了後に新しい記録を始めると送信セッションを初期化すること
 
-5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。次工程の5-6.3Cでは、送信セッション状態と送信調整処理をさらに小さな単位へ分けます。
+5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。次工程の5-6.3Dでは、送信順序を変えずに送信調整処理の境界を整理します。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
 
@@ -249,4 +250,37 @@ lib/features/record/
 - Apps Script、API payloadのキーと値
 
 純粋クラスには、検証文言、タグIDの昇順化、新規/既存建物で送信対象タグを切り替える処理、`RecordPreparationPayload`変換の単体テストを追加しています。
+
+### Record送信セッション状態の分離（5-6.3C）
+
+`RecordDraftController` に散在していた、1回の保存・再送にだけ必要な可変状態を `RecordSubmissionSession` へ集約しています。Controllerの公開getter・メソッドと送信手順は維持し、内部の参照先だけを専用クラスへ切り替えています。
+
+```text
+lib/features/record/controllers/
+├─ record_draft_controller.dart
+└─ record_submission_session.dart
+```
+
+送信セッションが保持する主な状態:
+
+- begin / finalize / 写真ごとのrequestId
+- 送信対象のbuildingId / visitId / visitedAt
+- `BeginRecordResult` / `FinalizeRecordResult`
+- 写真ごとのpending / uploading / uploaded / failed
+- 写真ごとの保存結果
+- 保存全体・準備・写真送信・確定・一括保存の計測値
+- 画面へ表示する送信phase・メッセージ
+
+`startNewRecord()`では、送信関連の初期化を `RecordSubmissionSession.reset()` にまとめました。新しい単体テストで、初期状態、写真状態の件数と進捗、下書きロック、reset後にrequestId・結果・状態・計測値が残らないことを確認します。
+
+維持している挙動:
+
+- `RecordDraftController` の公開APIと画面から見える状態
+- begin / 写真 / finalizeの実行順
+- 同じrequestIdでの手動再送と冪等性
+- 成功写真を再送せず失敗写真だけ再送
+- 写真1枚の一括保存経路と複数写真の4件wave
+- 認証期限切れ時の下書き保持
+- Service側の2枚バッチ・最大2バッチ並行・700ms遅延
+- Apps Script、Sheets / Drive、API payload
 

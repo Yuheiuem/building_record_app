@@ -20,6 +20,8 @@ import '../../../data/services/record_submission_api_service.dart';
 import '../../../data/services/tag_api_service.dart';
 import '../domain/record_submission_draft_builder.dart';
 
+part 'record_submission_session.dart';
+
 enum RecordBuildingMode { newBuilding, existingBuilding }
 
 enum RecordSubmissionPhase {
@@ -92,31 +94,80 @@ class RecordDraftController extends ChangeNotifier {
   String? _locationErrorMessage;
   String? _locationNoticeMessage;
 
-  RecordSubmissionPhase _submissionPhase = RecordSubmissionPhase.idle;
-  String? _submissionErrorMessage;
-  String? _submissionErrorDetail;
-  String? _submissionNoticeMessage;
-  String? _submissionOperationMessage;
-  DateTime? _submissionStartedAt;
-  BeginRecordResult? _beginRecordResult;
-  FinalizeRecordResult? _finalizeRecordResult;
-  String? _beginRequestId;
-  String? _finalizeRequestId;
-  String? _submissionBuildingId;
-  String? _submissionVisitId;
-  DateTime? _submissionVisitedAt;
-  String? _currentUploadingPhotoId;
-  final Map<String, String> _photoRequestIds = <String, String>{};
-  final Map<String, RecordPhotoUploadStatus> _photoUploadStatuses =
-      <String, RecordPhotoUploadStatus>{};
-  final Map<String, UploadRecordPhotoResult> _photoUploadResults =
-      <String, UploadRecordPhotoResult>{};
-  Duration? _lastSubmissionDuration;
-  Duration? _lastPreparationDuration;
-  Duration? _lastPhotoUploadDuration;
-  Duration? _lastFinalizeDuration;
-  Duration? _lastCombinedSaveDuration;
+  final RecordSubmissionSession _submissionSession = RecordSubmissionSession();
   int _draftRevision = 0;
+
+  RecordSubmissionPhase get _submissionPhase => _submissionSession.phase;
+  set _submissionPhase(RecordSubmissionPhase value) =>
+      _submissionSession.phase = value;
+  String? get _submissionErrorMessage => _submissionSession.errorMessage;
+  set _submissionErrorMessage(String? value) =>
+      _submissionSession.errorMessage = value;
+  String? get _submissionErrorDetail => _submissionSession.errorDetail;
+  set _submissionErrorDetail(String? value) =>
+      _submissionSession.errorDetail = value;
+  String? get _submissionNoticeMessage => _submissionSession.noticeMessage;
+  set _submissionNoticeMessage(String? value) =>
+      _submissionSession.noticeMessage = value;
+  String? get _submissionOperationMessage =>
+      _submissionSession.operationMessage;
+  set _submissionOperationMessage(String? value) =>
+      _submissionSession.operationMessage = value;
+  DateTime? get _submissionStartedAt => _submissionSession.startedAt;
+  set _submissionStartedAt(DateTime? value) =>
+      _submissionSession.startedAt = value;
+  BeginRecordResult? get _beginRecordResult =>
+      _submissionSession.beginRecordResult;
+  set _beginRecordResult(BeginRecordResult? value) =>
+      _submissionSession.beginRecordResult = value;
+  FinalizeRecordResult? get _finalizeRecordResult =>
+      _submissionSession.finalizeRecordResult;
+  set _finalizeRecordResult(FinalizeRecordResult? value) =>
+      _submissionSession.finalizeRecordResult = value;
+  String? get _beginRequestId => _submissionSession.beginRequestId;
+  set _beginRequestId(String? value) =>
+      _submissionSession.beginRequestId = value;
+  String? get _finalizeRequestId => _submissionSession.finalizeRequestId;
+  set _finalizeRequestId(String? value) =>
+      _submissionSession.finalizeRequestId = value;
+  String? get _submissionBuildingId => _submissionSession.buildingId;
+  set _submissionBuildingId(String? value) =>
+      _submissionSession.buildingId = value;
+  String? get _submissionVisitId => _submissionSession.visitId;
+  set _submissionVisitId(String? value) => _submissionSession.visitId = value;
+  DateTime? get _submissionVisitedAt => _submissionSession.visitedAt;
+  set _submissionVisitedAt(DateTime? value) =>
+      _submissionSession.visitedAt = value;
+  String? get _currentUploadingPhotoId =>
+      _submissionSession.currentUploadingPhotoId;
+  set _currentUploadingPhotoId(String? value) =>
+      _submissionSession.currentUploadingPhotoId = value;
+  Map<String, String> get _photoRequestIds =>
+      _submissionSession.photoRequestIds;
+  Map<String, RecordPhotoUploadStatus> get _photoUploadStatuses =>
+      _submissionSession.photoUploadStatuses;
+  Map<String, UploadRecordPhotoResult> get _photoUploadResults =>
+      _submissionSession.photoUploadResults;
+  Duration? get _lastSubmissionDuration =>
+      _submissionSession.lastSubmissionDuration;
+  set _lastSubmissionDuration(Duration? value) =>
+      _submissionSession.lastSubmissionDuration = value;
+  Duration? get _lastPreparationDuration =>
+      _submissionSession.lastPreparationDuration;
+  set _lastPreparationDuration(Duration? value) =>
+      _submissionSession.lastPreparationDuration = value;
+  Duration? get _lastPhotoUploadDuration =>
+      _submissionSession.lastPhotoUploadDuration;
+  set _lastPhotoUploadDuration(Duration? value) =>
+      _submissionSession.lastPhotoUploadDuration = value;
+  Duration? get _lastFinalizeDuration =>
+      _submissionSession.lastFinalizeDuration;
+  set _lastFinalizeDuration(Duration? value) =>
+      _submissionSession.lastFinalizeDuration = value;
+  Duration? get _lastCombinedSaveDuration =>
+      _submissionSession.lastCombinedSaveDuration;
+  set _lastCombinedSaveDuration(Duration? value) =>
+      _submissionSession.lastCombinedSaveDuration = value;
 
   UnmodifiableListView<RecordDraftPhoto> get photos =>
       UnmodifiableListView<RecordDraftPhoto>(_photos);
@@ -173,44 +224,30 @@ class RecordDraftController extends ChangeNotifier {
       _beginRecordResult?.performance;
   RecordPhasePerformance? get finalizeRecordPerformance =>
       _finalizeRecordResult?.performance;
-  bool get submissionSucceeded =>
-      _submissionPhase == RecordSubmissionPhase.succeeded;
-  bool get isSubmitting =>
-      _submissionPhase == RecordSubmissionPhase.starting ||
-      _submissionPhase == RecordSubmissionPhase.uploading ||
-      _submissionPhase == RecordSubmissionPhase.finalizing;
-  bool get isDraftLocked => _beginRequestId != null || isSubmitting;
+  bool get submissionSucceeded => _submissionSession.succeeded;
+  bool get isSubmitting => _submissionSession.isSubmitting;
+  bool get isDraftLocked => _submissionSession.isDraftLocked;
   bool get canSubmitRecord =>
       !isSubmitting && !submissionSucceeded && !_requiresReauthentication;
-  int get uploadedPhotoCount =>
-      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
-        return status == RecordPhotoUploadStatus.uploaded;
-      }).length;
+  int get uploadedPhotoCount => _submissionSession.countPhotosWithStatus(
+    RecordPhotoUploadStatus.uploaded,
+  );
   int get failedPhotoCount =>
-      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
-        return status == RecordPhotoUploadStatus.failed;
-      }).length;
-  int get uploadingPhotoCount =>
-      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
-        return status == RecordPhotoUploadStatus.uploading;
-      }).length;
+      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.failed);
+  int get uploadingPhotoCount => _submissionSession.countPhotosWithStatus(
+    RecordPhotoUploadStatus.uploading,
+  );
   int get pendingPhotoCount =>
-      _photoUploadStatuses.values.where((RecordPhotoUploadStatus status) {
-        return status == RecordPhotoUploadStatus.pending;
-      }).length;
-  double get submissionProgress {
-    if (_photos.isEmpty) {
-      return 0;
-    }
-    return uploadedPhotoCount / _photos.length;
-  }
+      _submissionSession.countPhotosWithStatus(RecordPhotoUploadStatus.pending);
+  double get submissionProgress =>
+      _submissionSession.progressForPhotoCount(_photos.length);
 
   RecordPhotoUploadStatus photoUploadStatus(String photoId) {
-    return _photoUploadStatuses[photoId] ?? RecordPhotoUploadStatus.pending;
+    return _submissionSession.photoStatus(photoId);
   }
 
   UploadRecordPhotoResult? photoUploadResult(String photoId) {
-    return _photoUploadResults[photoId];
+    return _submissionSession.photoResult(photoId);
   }
 
   bool get canUseSelectedBuildingLocation {
@@ -1184,28 +1221,7 @@ class RecordDraftController extends ChangeNotifier {
     _errorMessage = null;
     _noticeMessage = null;
     _photoPreparationStatusMessage = null;
-    _submissionPhase = RecordSubmissionPhase.idle;
-    _submissionErrorMessage = null;
-    _submissionErrorDetail = null;
-    _submissionNoticeMessage = null;
-    _submissionOperationMessage = null;
-    _submissionStartedAt = null;
-    _beginRecordResult = null;
-    _finalizeRecordResult = null;
-    _beginRequestId = null;
-    _finalizeRequestId = null;
-    _submissionBuildingId = null;
-    _submissionVisitId = null;
-    _submissionVisitedAt = null;
-    _currentUploadingPhotoId = null;
-    _photoRequestIds.clear();
-    _photoUploadStatuses.clear();
-    _photoUploadResults.clear();
-    _lastSubmissionDuration = null;
-    _lastPreparationDuration = null;
-    _lastPhotoUploadDuration = null;
-    _lastFinalizeDuration = null;
-    _lastCombinedSaveDuration = null;
+    _submissionSession.reset();
     _draftRevision += 1;
     notifyListeners();
 
