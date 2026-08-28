@@ -2,8 +2,8 @@ part of 'record_draft_controller.dart';
 
 /// 1回の記録保存と、その失敗後の再送に必要な可変状態をまとめて保持する。
 ///
-/// 送信手順そのものは引き続き[RecordDraftController]が担当し、このクラスは
-/// requestId、保存先ID、写真ごとの送信状態、結果、計測値だけを保持する。
+/// 送信手順は[RecordDraftController]と各Executor／Coordinatorが担当し、
+/// このクラスはrequestId、保存先ID、写真ごとの状態、結果、計測値だけを保持する。
 class RecordSubmissionSession {
   RecordSubmissionPhase phase = RecordSubmissionPhase.idle;
   String? errorMessage;

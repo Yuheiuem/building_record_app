@@ -7,8 +7,8 @@ import '../domain/record_submission_draft_builder.dart';
 
 /// 複数写真保存で、写真1枚分のAPI呼び出しと例外の結果化を担当する。
 ///
-/// waveの順序、並列数、再送判断、画面状態の更新は引き続き
-/// `RecordDraftController`が担当する。
+/// waveの順序、並列数、再送判断、送信状態の更新は
+/// `RecordMultiplePhotoSubmissionCoordinator`が担当する。
 class RecordPhotoUploadExecutor {
   const RecordPhotoUploadExecutor({
     required RecordSubmissionApiService recordSubmissionApiService,

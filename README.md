@@ -2,7 +2,7 @@
 
 建築物・建築現場の訪問記録を、写真・位置情報・タグ・メモとともに個人用Google環境へ保存し、Flutter Webから登録・閲覧するアプリです。
 
-現在の実装段階は **段階 5-6.3E**、アプリバージョンは **v0.20.13** です。
+現在の実装段階は **段階 5-6.3F**、アプリバージョンは **v0.20.14** です。
 ## 現在できること
 
 - Googleアカウントでログイン
@@ -151,7 +151,7 @@ Google OAuth Web Client IDやApps Script Web App URLは公開識別子・公開�
   - **5-6.3C**: requestId・保存先ID・写真状態・結果・計測値を送信セッションへ分離（実施済み）
   - **5-6.3D**: 複数写真の1枚分送信と結果反映を専用クラス・送信セッションへ分離（実施済み）
   - **5-6.3E**: 写真1枚の準備・保存・確定をまとめた1通信経路を専用クラスへ分離（実施済み）
-  - **5-6.3F**: begin・4件wave・finalizeの複数写真送信調整処理を分離（次工程）
+  - **5-6.3F**: begin・4件wave・finalizeの複数写真送信調整処理を分離（実施済み・5-6.3完了）
 - **5-6.4**: `record_service.gs` の物理分割とApps Script共通処理整理
 - **5-6.5**: Flutter側のApps Script HTTP共通処理整理
 段階5-6では、認証、requestId/photoIdによる冪等性、手動再送、写真送信のバッチ方式、SheetsのLock位置、論理削除から完全削除へ進む安全な順序など、実機確認済みの挙動を維持します。
@@ -223,7 +223,7 @@ lib/features/record/presentation/
 - 既存建物では今回追加するタグだけを送ること
 - 保存完了後に新しい記録を始めると送信セッションを初期化すること
 
-5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。5-6.3Dでは、複数写真の1枚分のAPI呼び出しと例外変換を `RecordPhotoUploadExecutor` へ、成功結果の状態反映を `RecordSubmissionSession` へ移しました。5-6.3Eでは、写真1枚の準備・保存・確定をまとめる1通信経路を `RecordSinglePhotoSubmissionExecutor` へ分離しました。次工程の5-6.3Fでは、begin・4件wave・finalizeの順序を維持したまま複数写真の送信調整処理を分離します。
+5-6.3Bでは、この回帰テストを維持したまま入力検証と送信用draft生成をController外へ分離しました。5-6.3Cでは、requestId、保存先ID、写真ごとの送信状態・結果、処理時間を `RecordSubmissionSession` へ集約しました。5-6.3Dでは、複数写真の1枚分のAPI呼び出しと例外変換を `RecordPhotoUploadExecutor` へ、成功結果の状態反映を `RecordSubmissionSession` へ移しました。5-6.3Eでは、写真1枚の準備・保存・確定をまとめる1通信経路を `RecordSinglePhotoSubmissionExecutor` へ分離しました。5-6.3Fでは、begin・4件wave・finalizeの順序を維持したまま複数写真の送信調整処理を `RecordMultiplePhotoSubmissionCoordinator` へ分離し、5-6.3を完了しました。次工程は5-6.4のApps Script回帰テスト整理と `record_service.gs` の物理分割です。
 
 整理完了後に、容量逼迫時のデータ引っ越し機能、他利用者向け配布版を検討します。
 
@@ -353,3 +353,35 @@ lib/features/record/controllers/
 - Service側の2枚バッチ・最大2バッチ並行・700ms遅延
 - Apps Script、Sheets / Drive、API payload
 
+
+
+### 複数写真送信Coordinatorの分離（5-6.3F）
+
+複数写真保存の `beginRecord → 4件単位wave → finalizeRecord` を
+`RecordMultiplePhotoSubmissionCoordinator` へ分離しました。
+
+```text
+record_draft_controller.dart
+└─ 送信開始前の認証・ID準備、画面全体の成功/失敗表示、Bootstrap再取得
+
+record_multiple_photo_submission_coordinator.dart
+├─ beginRecord
+├─ 未送信写真の抽出
+├─ 4件単位wave
+├─ RecordPhotoUploadExecutorによる各写真送信
+├─ 失敗時の中断と失敗分だけの保持
+└─ finalizeRecord
+```
+
+次の挙動は変更していません。
+
+- begin / finalizeのrequestId再利用
+- 成功写真を再送しない
+- 失敗写真だけ同じrequestIdで再送
+- 4件単位wave
+- Service側の2枚バッチ、最大2バッチ並行、700ms遅延
+- 認証切れ時の下書き保持
+- Apps Script / Sheets / Drive / API payload
+
+これで段階5-6.3のController内部責務整理は完了です。次は段階5-6.4で、
+Apps Scriptの既存回帰テストを整理した後、`record_service.gs` を処理変更なしで物理分割します。

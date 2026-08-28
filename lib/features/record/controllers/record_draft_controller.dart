@@ -22,6 +22,7 @@ import '../domain/record_submission_draft_builder.dart';
 import 'record_photo_upload_executor.dart';
 import 'record_single_photo_submission_executor.dart';
 
+part 'record_multiple_photo_submission_coordinator.dart';
 part 'record_submission_session.dart';
 
 enum RecordBuildingMode { newBuilding, existingBuilding }
@@ -50,13 +51,13 @@ class RecordDraftController extends ChangeNotifier {
        _authService = authService,
        _locationService = locationService,
        _tagApiService = tagApiService,
-       _recordSubmissionApiService = recordSubmissionApiService,
-       _photoUploadExecutor = RecordPhotoUploadExecutor(
-         recordSubmissionApiService: recordSubmissionApiService,
-       ),
        _singlePhotoSubmissionExecutor = RecordSinglePhotoSubmissionExecutor(
          recordSubmissionApiService: recordSubmissionApiService,
-       ) {
+       ),
+       _multiplePhotoSubmissionCoordinator =
+           RecordMultiplePhotoSubmissionCoordinator(
+             recordSubmissionApiService: recordSubmissionApiService,
+           ) {
     _authService.addListener(_handleAuthServiceChanged);
   }
 
@@ -65,9 +66,9 @@ class RecordDraftController extends ChangeNotifier {
   final AuthService _authService;
   final RecordLocationService _locationService;
   final TagApiService _tagApiService;
-  final RecordSubmissionApiService _recordSubmissionApiService;
-  final RecordPhotoUploadExecutor _photoUploadExecutor;
   final RecordSinglePhotoSubmissionExecutor _singlePhotoSubmissionExecutor;
+  final RecordMultiplePhotoSubmissionCoordinator
+  _multiplePhotoSubmissionCoordinator;
 
   final List<RecordDraftPhoto> _photos = <RecordDraftPhoto>[];
   final List<Building> _buildings = <Building>[];
@@ -836,7 +837,14 @@ class RecordDraftController extends ChangeNotifier {
     try {
       final List<String> failedDetails = _photos.length == 1
           ? await _submitSinglePhotoRecord(idToken, submissionDraft)
-          : await _submitMultiplePhotoRecord(idToken, submissionDraft);
+          : await _multiplePhotoSubmissionCoordinator.submit(
+              session: _submissionSession,
+              idToken: idToken,
+              submissionDraft: submissionDraft,
+              photos: _photos,
+              onSessionChanged: notifyListeners,
+              onAuthenticationRequired: _markAuthenticationRequired,
+            );
 
       _currentUploadingPhotoId = null;
       if (failedDetails.isNotEmpty) {
@@ -996,151 +1004,6 @@ class RecordDraftController extends ChangeNotifier {
       combinedSaveStopwatch.stop();
       _lastCombinedSaveDuration = combinedSaveStopwatch.elapsed;
     }
-  }
-
-  Future<List<String>> _submitMultiplePhotoRecord(
-    String idToken,
-    RecordSubmissionDraft submissionDraft,
-  ) async {
-    if (_beginRecordResult == null) {
-      _submissionPhase = RecordSubmissionPhase.starting;
-      _submissionOperationMessage = '建物・訪問データを送信しています。';
-      notifyListeners();
-
-      final Stopwatch preparationStopwatch = Stopwatch()..start();
-      try {
-        final BeginRecordResult beginResult = await _recordSubmissionApiService
-            .beginRecord(
-              requestId: _beginRequestId!,
-              clientVersion: AppConfig.version,
-              idToken: idToken,
-              buildingMode: submissionDraft.buildingMode,
-              buildingId: submissionDraft.buildingId,
-              visitId: submissionDraft.visitId,
-              buildingName: submissionDraft.buildingName,
-              designTagIds: submissionDraft.designTagIds,
-              salesTagIds: submissionDraft.salesTagIds,
-              constructionTagIds: submissionDraft.constructionTagIds,
-              visitedAt: submissionDraft.visitedAt,
-              triggerTagIds: submissionDraft.triggerTagIds,
-              impression: submissionDraft.impression,
-              latitude: submissionDraft.location.latitude,
-              longitude: submissionDraft.location.longitude,
-              accuracyM: submissionDraft.location.accuracyM,
-              locationSource: submissionDraft.location.source.apiValue,
-              expectedPhotoCount: submissionDraft.expectedPhotoCount,
-            );
-        _beginRecordResult = beginResult;
-        _submissionBuildingId = beginResult.buildingId;
-        _submissionVisitId = beginResult.visitId;
-      } finally {
-        preparationStopwatch.stop();
-        _lastPreparationDuration = preparationStopwatch.elapsed;
-      }
-    }
-
-    final List<RecordDraftPhoto> pendingPhotos = _photos
-        .where(
-          (RecordDraftPhoto photo) =>
-              photoUploadStatus(photo.photoId) !=
-              RecordPhotoUploadStatus.uploaded,
-        )
-        .toList(growable: false);
-    final List<String> failedDetails = <String>[];
-
-    if (pendingPhotos.isNotEmpty) {
-      final Stopwatch photoUploadStopwatch = Stopwatch()..start();
-      try {
-        for (int offset = 0; offset < pendingPhotos.length; offset += 4) {
-          final int end = (offset + 4).clamp(0, pendingPhotos.length).toInt();
-          final List<RecordDraftPhoto> wave = pendingPhotos.sublist(
-            offset,
-            end,
-          );
-
-          _submissionPhase = RecordSubmissionPhase.uploading;
-          final int completedBeforeWave = uploadedPhotoCount;
-          _submissionOperationMessage =
-              '写真を送信用データへ変換して送信しています。'
-              ' 完了 $completedBeforeWave/${_photos.length}枚、'
-              '今回 ${wave.length}枚を処理中です。';
-          _currentUploadingPhotoId = wave.first.photoId;
-          for (final RecordDraftPhoto photo in wave) {
-            _photoUploadStatuses[photo.photoId] =
-                RecordPhotoUploadStatus.uploading;
-          }
-          notifyListeners();
-
-          final List<RecordPhotoUploadAttempt> attempts = await Future.wait(
-            wave.map((RecordDraftPhoto photo) {
-              return _photoUploadExecutor.upload(
-                requestId: _photoRequestIds[photo.photoId]!,
-                idToken: idToken,
-                buildingId: _submissionBuildingId!,
-                visitId: _submissionVisitId!,
-                submissionDraft: submissionDraft,
-                photo: photo,
-                displayOrder: _photos.indexOf(photo) + 1,
-              );
-            }),
-          );
-
-          for (final RecordPhotoUploadAttempt attempt in attempts) {
-            final UploadRecordPhotoResult? result = attempt.result;
-            if (result != null) {
-              _submissionSession.applyPhotoUploadResult(
-                photoId: attempt.photo.photoId,
-                result: result,
-              );
-              continue;
-            }
-
-            _photoUploadStatuses[attempt.photo.photoId] =
-                RecordPhotoUploadStatus.failed;
-            if (attempt.authenticationRequired) {
-              _markAuthenticationRequired(idToken);
-            }
-            failedDetails.add(
-              '${attempt.photo.fileName}: '
-              '${attempt.errorMessage ?? '不明なエラー'}',
-            );
-          }
-          notifyListeners();
-
-          if (failedDetails.isNotEmpty) {
-            _submissionOperationMessage = '一部の写真送信に失敗しました。失敗分だけ再送できます。';
-            return failedDetails;
-          }
-        }
-      } finally {
-        photoUploadStopwatch.stop();
-        _lastPhotoUploadDuration = photoUploadStopwatch.elapsed;
-      }
-    }
-
-    if (_finalizeRecordResult == null) {
-      _submissionPhase = RecordSubmissionPhase.finalizing;
-      _submissionOperationMessage = '保存した写真を確認して記録を確定しています。';
-      _currentUploadingPhotoId = null;
-      notifyListeners();
-
-      final Stopwatch finalizeStopwatch = Stopwatch()..start();
-      try {
-        _finalizeRecordResult = await _recordSubmissionApiService
-            .finalizeRecord(
-              requestId: _finalizeRequestId!,
-              clientVersion: AppConfig.version,
-              idToken: idToken,
-              buildingId: _submissionBuildingId!,
-              visitId: _submissionVisitId!,
-            );
-      } finally {
-        finalizeStopwatch.stop();
-        _lastFinalizeDuration = finalizeStopwatch.elapsed;
-      }
-    }
-
-    return failedDetails;
   }
 
   Future<void> startNewRecord() async {
